@@ -77,7 +77,9 @@ The element might not have been visible within the timeout period (3000ms). This
 
 ## Screenshots
 
-Screenshots of the implementation and results will be added soon!
+![full](https://github.com/user-attachments/assets/a7538cc4-1277-4bdd-b044-598db8dc16ed)
+
+![image](https://github.com/user-attachments/assets/94daecc2-da56-4078-a537-49078f9663d6)
 
 ## License
 
