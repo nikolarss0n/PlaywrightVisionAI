@@ -1,0 +1,35 @@
+{
+  "name": "playwright-ai-overlay",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx playwright test --reporter=html",
+    "test:debug": "playwright test --debug"
+  },
+  "author": "Your Name",
+  "license": "ISC",
+  "description": "AI-powered visual debugging overlay for Playwright tests using Gemini 1.5",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.0",
+    "@playwright/test": "^1.51.1",
+    "dotenv": "^16.4.7",
+    "marked": "^15.0.7"
+  },
+  "devDependencies": {
+    "@types/marked": "^5.0.2",
+    "@types/node": "^22.13.14"
+  },
+  "keywords": [
+    "playwright",
+    "testing",
+    "ai",
+    "debugging",
+    "visual testing",
+    "test automation",
+    "gemini ai"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/playwright-ai-overlay.git"
+  }
+}
