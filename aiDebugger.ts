@@ -29,7 +29,7 @@ export interface AiDebuggingResult {
 const apiKey: string | undefined = process.env.API_KEY;
 
 // --- SELECT MODEL ---
-export const MODEL_NAME = "gemini-1.5-flash-latest";
+export const MODEL_NAME = "gemini-1.5-pro-latest";
 // const MODEL_NAME = "gemini-1.5-pro-latest";
 // --------------------
 
@@ -178,10 +178,15 @@ Failing Selector Attempted: \`${data.failingSelector || 'N/A'}\`
 ${data.stackTrace || 'N/A'}
 --- End Stack Trace ---
 
+${data.testCode ? `--- Test Code ---
+${data.testCode}
+--- End Test Code ---
+` : ''}
 
 Context:
 1. ${data.screenshotBase64 ? 'A screenshot of the web page at the time of error IS PROVIDED. **Prioritize visual analysis of the screenshot.**' : 'No screenshot is available.'}
 2. HTML source code context is provided below. Note: ${htmlContextDescription}
+${data.testCode ? '3. The test code is provided for analysis and improvement suggestions.' : ''}
 
 Instructions:
 Based *primarily on the screenshot* (if provided) and secondarily on the HTML context:
@@ -196,10 +201,40 @@ Based *primarily on the screenshot* (if provided) and secondarily on the HTML co
 
 3.  **Explain Failure:** Provide a concise explanation of the *most likely* reason the original selector (\`${data.failingSelector || 'N/A'}\`) failed, consistent with the screenshot/HTML.
 
-4.  **Format Output (Pure Markdown):** Present the analysis using **standard Markdown**. Use level 3 headings (e.g., \`### Element Identification\`), bold text (\`**bold**\`), inline code (\`code\`), and numbered/bullet lists. Structure into three sections separated by horizontal rules (\`---\`):
-    * \`### Element Identification\`
-    * \`### Suggested Locators\`
-    * \`### Failure Explanation\`
+${data.testCode ? `4.  **Test Improvement Suggestions:** Review the test code and suggest improvements:
+    * Replace hardcoded waits with proper expectations or state checks
+    * Suggest better selectors or waiting strategies
+    * Identify potential flakiness issues
+    * Recommend additional assertions or validations
+    * Suggest possible test extensions based on the UI shown in the screenshot
+
+5.  **Architectural Improvements:** Suggest the MOST BENEFICIAL architectural pattern(s) for this specific test, including:
+    * Page Object Model (POM) - separate page interactions from test logic
+    * Component Pattern - create reusable UI component abstractions
+    * Factory Pattern - improve test data creation
+    * Business Layer Pattern - abstract test steps into business-focused methods
+    * Error handling improvements - remove try/catch from test methods
+
+    For each recommendation:
+    * Explain WHY this pattern would benefit this specific test
+    * Show a CONCRETE code example of how to refactor the test using this pattern
+    * Focus on the 1-2 patterns that would most improve maintainability for this specific test
+` : ''}
+
+6.  **Format Output (Pure Markdown):** Present the analysis using **standard Markdown**. Use level 3 headings (e.g., \`### Element Identification\`), bold text (\`**bold**\`), inline code (\`code\`), and numbered/bullet lists. 
+
+    Structure into ${data.testCode ? 'five' : 'three'} sections, EACH separated by horizontal rules (\`---\`):
+    * \`### Element Identification\` (first section)
+    * \`---\` (horizontal rule separator)
+    * \`### Suggested Locators\` (second section)
+    * \`---\` (horizontal rule separator)
+    * \`### Failure Explanation\` (third section)
+    ${data.testCode ? '* `---` (horizontal rule separator)' : ''}
+    ${data.testCode ? '* `### Test Improvement Suggestions` (fourth section)' : ''}
+    ${data.testCode ? '* `---` (horizontal rule separator)' : ''}
+    ${data.testCode ? '* `### Architectural Improvements` (fifth section)' : ''}
+    
+    IMPORTANT: Insert a horizontal rule (---) BETWEEN EACH SECTION to ensure proper visual separation.
 
 === HTML Source Context ===
 ${htmlContext}

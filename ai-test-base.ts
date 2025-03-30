@@ -11,6 +11,7 @@ import {
   wrapTextInBox,
 } from './aiDebugger'; // Assuming './aiDebugger.ts'
 import { extractSelectorFromError } from './errorUtils'; // Assuming './errorUtils.ts'
+import * as fs from 'fs';
 
 // Define the shape of the AI analysis input (remains the same)
 interface AiAnalysisInput {
@@ -20,6 +21,7 @@ interface AiAnalysisInput {
   stackTrace?: string;
   failingSelector?: string;
   testTitle?: string;
+  testCode?: string; // Add the test code content
 }
 
 // Helper function to escape HTML characters (remains the same)
@@ -31,6 +33,33 @@ function escapeHtml(unsafe: string | undefined | null): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+/**
+ * Attempts to extract test code from the test file
+ * @param testInfo TestInfo object from Playwright
+ * @returns The test code if found, undefined otherwise
+ */
+function extractTestCode(testInfo: TestInfo): string | undefined {
+  try {
+    // Get file path from testInfo
+    const testFilePath = testInfo.file;
+    if (!testFilePath || !fs.existsSync(testFilePath)) {
+      console.warn(`⚠️ Could not find test file: ${testFilePath}`);
+      return undefined;
+    }
+    
+    // Read the test file
+    const fileContent = fs.readFileSync(testFilePath, 'utf8');
+    
+    // For now, return the whole file content - in the future we could extract just 
+    // the specific test based on test title, but that's more complex
+    // since tests can have complex structures (nested describes, etc.)
+    return fileContent;
+  } catch (error: any) {
+    console.warn(`⚠️ Error extracting test code: ${error.message}`);
+    return undefined;
+  }
 }
 
 // Extend the base test object
@@ -97,6 +126,14 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
           console.log(`${SEPARATOR}`);
           // --- End Context Gathering ---
 
+          // Extract the test code
+          const testCode = extractTestCode(testInfo);
+          if (testCode) {
+            console.log("✅ Test code extracted.");
+          } else {
+            console.warn("⚠️ Could not extract test code.");
+          }
+
           // --- Prepare AI Input ---
           const aiInput: AiAnalysisInput = {
             html: html,
@@ -105,6 +142,7 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
             stackTrace: stackTrace,
             failingSelector: failingSelector || undefined,
             testTitle: testInfo.title,
+            testCode: testCode // Include the test code
           };
 
           // --- Call AI *BEFORE* Generating HTML Report ---
@@ -306,6 +344,12 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
              <p><strong>Status:</strong> <strong class="font-semibold ${testInfo.status === 'failed' ? 'text-red-300' : 'text-orange-300'}">${escapeHtml(testInfo.status)}</strong></p>
              <p><strong>Duration:</strong> ${testInfo.duration}ms</p>
              ${failingSelector ? `<p><strong>Failing Selector:</strong> <code class="inline-code">${escapeHtml(failingSelector)}</code></p>` : ''}
+             ${testCode ? `
+             <div class="mt-4">
+               <p><strong>Test Code:</strong></p>
+               <pre class="bg-gray-800 text-gray-200 p-3 rounded-md text-sm overflow-x-auto mt-2"><code>${escapeHtml(testCode)}</code></pre>
+             </div>
+             ` : ''}
         </div>
 
          <div class="glass-effect rounded-2xl max-w-3xl w-full">
@@ -356,14 +400,10 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
             console.error(`\n❌ Error attaching HTML report: ${attachError.message}`, attachError);
           }
 
-          // --- Optional: Append raw markdown to stack trace for console ---
-          if (testInfo.error) {
-            const consoleSeparator = `\n\n${SEPARATOR}\n${createCenteredHeader("💡 AI Debugging Suggestions (Raw) 💡")}\n${SEPARATOR}\n\n`;
-            const consoleContent = aiAnalysisResult?.errorMarkdown ?? aiAnalysisResult?.analysisMarkdown ?? "No AI content available.";
-            const consoleUsage = aiAnalysisResult?.usageInfoMarkdown ?? "";
-            const baseStack = stackTrace || errorMsg || 'Unknown error';
-            testInfo.error.stack = baseStack + consoleSeparator + consoleContent + "\n\n" + consoleUsage + `\n\n${BOTTOM_BORDER}\n`;
-          }
+          // --- Log AI analysis completion to console, but don't modify error stack ---
+          console.log(`\n${SEPARATOR}\n${createCenteredHeader("💡 AI Debugging Complete 💡")}\n${SEPARATOR}`);
+          console.log(`AI analysis results attached to test report.`);
+          console.log(`View HTML report and markdown attachment for details.`);
 
           // --- Optional: Attach raw markdown as separate text file ---
           try {
@@ -389,9 +429,16 @@ ${wrapTextInBox(`Error: ${captureError?.message || captureError}`)}
 ${BOTTOM_BORDER}
 `;
           console.error(captureErrorBox);
-          if (testInfo.error) {
-            const separator = `\n\n${SEPARATOR}\n${createCenteredHeader("❌ Error During Failure Handling ❌")}\n${SEPARATOR}\n\n`;
-            testInfo.error.stack = (testInfo.error.stack || testInfo.error.message || 'Unknown initial error') + separator + `Failed to capture context or process failure: ${captureError?.message || captureError}` + `\n\n${BOTTOM_BORDER}\n`;
+          // Log error but don't modify stack trace
+          console.error(`Context capture or AI processing failed: ${captureError?.message || captureError}`);
+          // Attempt to attach a basic error report
+          try {
+            await testInfo.attach('ai-processing-error.txt', {
+              body: `Error during AI analysis: ${captureError?.message || captureError}\n\nStack trace: ${captureError?.stack || 'No stack trace available'}`,
+              contentType: 'text/plain',
+            });
+          } catch (e) {
+            console.error('Could not attach error details.');
           }
         }
       } else if (page.isClosed()) {
@@ -401,8 +448,14 @@ ${BOTTOM_BORDER}
         console.warn(`${SEPARATOR}`);
         console.warn(wrapTextInBox("Page was closed before context could be captured for AI analysis. Test: " + testInfo.title));
         console.warn(`${BOTTOM_BORDER}`);
-        if (testInfo.error) {
-          testInfo.error.stack = (testInfo.error.stack || testInfo.error.message || '') + "\n\n[Warning: Page closed before full context capture.]";
+        // Log warning but don't modify error stack
+        try {
+          await testInfo.attach('ai-analysis-skipped.txt', {
+            body: 'Page was closed before context could be captured for AI analysis.',
+            contentType: 'text/plain',
+          });
+        } catch (e) {
+          console.error('Could not attach warning details.');
         }
       } else if (!testInfo.error) {
         // --- Log No Error Object Warning --- (Same as before)
