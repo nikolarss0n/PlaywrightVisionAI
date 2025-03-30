@@ -62,19 +62,6 @@ When a test fails, the AI overlay will:
 
 When a test fails, you'll see detailed AI analysis in your test report:
 
-```
-### 🎯 Element Identification
-The test was trying to interact with an API link in the navigation menu, which appears in the top part of the page.
-
-### ✨ Suggested Locators
-1. **User-Facing:** `page.getByRole('link', { name: 'API' })`
-2. **CSS:** `page.locator('nav >> text=API')`
-3. **XPath:** `page.locator('//a[contains(text(),"API")]')`
-
-### ❓ Failure Explanation
-The element might not have been visible within the timeout period (3000ms). This could be due to page loading time, animation effects, or the element being located in a dropdown that needs to be opened first.
-```
-
 ## Screenshots
 
 ![full_latest](https://github.com/user-attachments/assets/a1da4119-5631-46d4-8d15-d279f0ed3e04)
