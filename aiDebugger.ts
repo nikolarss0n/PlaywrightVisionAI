@@ -18,6 +18,13 @@ interface AiAnalysisInput {
   testTitle?: string;
 }
 
+// --- Result structure from AI call ---
+export interface AiDebuggingResult {
+  analysisMarkdown: string | null;
+  usageInfoMarkdown: string | null;
+  errorMarkdown: string | null;
+}
+
 // --- IMPORTANT ---
 const apiKey: string | undefined = process.env.API_KEY;
 
@@ -48,123 +55,82 @@ const generationConfig = {
   maxOutputTokens: 1024, // Max tokens for the *output*
 };
 
-// --- Box Drawing Configuration ---
-export const BOX_WIDTH = 100; // More reasonable width for terminal/report viewing
+// --- Styling Configuration (Primarily for Console Fallback Now) ---
+export const BOX_WIDTH = 100;
 export const TOP_BORDER = '┌' + '─'.repeat(BOX_WIDTH) + '┐';
 export const BOTTOM_BORDER = '└' + '─'.repeat(BOX_WIDTH) + '┘';
 export const SEPARATOR = '├' + '─'.repeat(BOX_WIDTH) + '┤';
 
-/**
- * Creates a centered header line for the box.
- * @param text The text to center.
- * @returns A formatted string for the header line.
- */
+// These helpers might still be useful for console logs, but not the primary output mechanism
+export function createStyledMarkdownBox(title: string, content: string, type: 'analysis' | 'usage' | 'error' = 'analysis'): string {
+  let emoji = '🔍';
+  if (type === 'usage') emoji = '📊';
+  else if (type === 'error') emoji = '⚠️';
+  else if (type === 'analysis') emoji = '🧠';
+  const formattedContent = content.split('\n').map(line => line.trim() ? line : '').join('\n');
+  return `\n---\n\n## ${emoji} ${title}\n\n${formattedContent}\n\n---\n`;
+}
 export function createCenteredHeader(text: string): string {
   const padding = Math.max(0, BOX_WIDTH - text.length);
   const leftPad = Math.floor(padding / 2);
   const rightPad = Math.ceil(padding / 2);
   return '│' + ' '.repeat(leftPad) + text + ' '.repeat(rightPad) + '│';
 }
-
-/**
- * Wraps multi-line text within the box side borders.
- * Adds padding to the left.
- * @param text The text block to wrap.
- * @param indent Number of spaces to indent text inside the border.
- * @returns Formatted text block with borders.
- */
 export function wrapTextInBox(text: string, indent: number = 2): string {
   const indentStr = ' '.repeat(indent);
-  // Adjust max line length based on the new BOX_WIDTH and indent
-  const maxLineLength = BOX_WIDTH - indent - 1; // -1 for the right border '│'
-
-  return text
-    .split('\n')
-    .map(originalLine => {
-      let currentLine = originalLine;
-      let resultLines: string[] = [];
-
-      while (currentLine.length > maxLineLength) {
-        let breakPoint = currentLine.lastIndexOf(' ', maxLineLength);
-        if (breakPoint === -1 || breakPoint === 0) {
-          breakPoint = maxLineLength;
-        }
-        resultLines.push(currentLine.substring(0, breakPoint));
-        currentLine = currentLine.substring(breakPoint).trimStart();
-      }
-      resultLines.push(currentLine);
-
-      return resultLines.map(subLine =>
-        '│' + indentStr + subLine.padEnd(BOX_WIDTH - indent) + '│'
-      ).join('\n');
-    })
-    .join('\n');
+  const maxLineLength = BOX_WIDTH - indent - 1;
+  return text.split('\n').map(originalLine => {
+    let currentLine = originalLine;
+    let resultLines: string[] = [];
+    while (currentLine.length > maxLineLength) {
+      let breakPoint = currentLine.lastIndexOf(' ', maxLineLength);
+      if (breakPoint <= 0) breakPoint = maxLineLength;
+      resultLines.push(currentLine.substring(0, breakPoint));
+      currentLine = currentLine.substring(breakPoint).trimStart();
+    }
+    resultLines.push(currentLine);
+    return resultLines.map(subLine => '│' + indentStr + subLine.padEnd(BOX_WIDTH - indent) + '│').join('\n');
+  }).join('\n');
 }
-// --- End Box Drawing Configuration ---
+// --- End Styling Configuration ---
 
 
 export function cleanBase64(base64String: string): string {
   return base64String.replace(/^data:image\/\w+;base64,/, '');
 }
 
-/**
- * Extracts and cleans body content from HTML string
- * Removes scripts, style tags, and excessive whitespace to reduce token count
- * @param html HTML string to process
- * @returns Cleaned body content or null if not found
- */
 function extractBodyContent(html: string | undefined): string | null {
   if (!html) return null;
-
-  // Extract body content
   const bodyMatch = html.match(/<body(?:[^>]*?)>([\s\S]*?)<\/body>/i);
   if (!bodyMatch) return null;
-
   let bodyContent = bodyMatch[1].trim();
 
-  // Remove all script tags and their contents (major token reduction)
   bodyContent = bodyContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-
-  // Remove all style tags and their contents (major token reduction)
   bodyContent = bodyContent.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
-
-  // Remove inline styles (reduces tokens)
-  bodyContent = bodyContent.replace(/\s+style\s*=\s*"[^"]*"/gi, '');
-  bodyContent = bodyContent.replace(/\s+style\s*=\s*'[^']*'/gi, '');
-
-  // Remove data attributes (reduces tokens)
-  bodyContent = bodyContent.replace(/\s+data-[^=\s>]*\s*=\s*"[^"]*"/gi, '');
-  bodyContent = bodyContent.replace(/\s+data-[^=\s>]*\s*=\s*'[^']*'/gi, '');
-
-  // Remove inline JavaScript events (onclick, onload, etc.)
-  bodyContent = bodyContent.replace(/\s+on\w+\s*=\s*"[^"]*"/gi, '');
-  bodyContent = bodyContent.replace(/\s+on\w+\s*=\s*'[^']*'/gi, '');
-
-  // Remove HTML comments (reduces tokens)
+  bodyContent = bodyContent.replace(/\s+style\s*=\s*(?:"[^"]*"|'[^']*')/gi, '');
+  bodyContent = bodyContent.replace(/\s+data-[^=\s>]*\s*=\s*(?:"[^"]*"|'[^']*')/gi, '');
+  bodyContent = bodyContent.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, '');
   bodyContent = bodyContent.replace(/<!--[\s\S]*?-->/g, '');
-
-  // Normalize whitespace to reduce token count
   bodyContent = bodyContent.replace(/\s+/g, ' ');
-
-  // Log token optimization
-  const originalSize = bodyMatch[1].trim().length;
-  const optimizedSize = bodyContent.length;
-  const reduction = ((originalSize - optimizedSize) / originalSize * 100).toFixed(1);
-
   return bodyContent;
 }
 
 
-export async function callDebuggingAI(data: AiAnalysisInput): Promise<string | null> {
+/**
+ * Calls the Generative AI model for debugging analysis.
+ * @param data Input data including context like HTML, screenshot, error.
+ * @returns A Promise resolving to an AiDebuggingResult object.
+ */
+export async function callDebuggingAI(data: AiAnalysisInput): Promise<AiDebuggingResult> {
+  const result: AiDebuggingResult = {
+    analysisMarkdown: null,
+    usageInfoMarkdown: null,
+    errorMarkdown: null,
+  };
+
   if (!apiKey) {
-    return `
-      ${TOP_BORDER}
-      ${createCenteredHeader(" Configuration Error ")}
-      ${SEPARATOR}
-      ${wrapTextInBox("GOOGLE_API_KEY is not set or is a placeholder.")}
-      ${wrapTextInBox("AI analysis cannot proceed.")}
-      ${BOTTOM_BORDER}
-      `;
+    result.errorMarkdown = `**Configuration Error:** GOOGLE_API_KEY is not set. AI analysis cannot proceed.`;
+    return result;
   }
 
   try {
@@ -176,7 +142,7 @@ export async function callDebuggingAI(data: AiAnalysisInput): Promise<string | n
     });
 
     // --- HTML Context Preparation ---
-    const MAX_BODY_CONTEXT_SIZE = 16000;
+    const MAX_BODY_CONTEXT_SIZE = 16000; // Adjust as needed
     let htmlContext = 'HTML not available.';
     let htmlContextDescription = 'HTML not available.';
     const originalHtml = data.html;
@@ -185,26 +151,18 @@ export async function callDebuggingAI(data: AiAnalysisInput): Promise<string | n
       if (bodyContent) {
         if (bodyContent.length <= MAX_BODY_CONTEXT_SIZE) {
           htmlContext = bodyContent;
-          htmlContextDescription = 'Only <body> content is provided (<head> excluded).';
+          htmlContextDescription = 'Only sanitized <body> content provided.';
         } else {
           const chunkSize = Math.floor(MAX_BODY_CONTEXT_SIZE / 2);
           const startChunk = bodyContent.substring(0, chunkSize);
           const endChunk = bodyContent.substring(bodyContent.length - chunkSize);
-          htmlContext = `${startChunk}\n\n...\n[BODY CONTENT TRUNCATED IN THE MIDDLE]\n...\n\n${endChunk}`;
-          htmlContextDescription = 'Only <body> content is provided (<head> excluded), AND the body content itself was truncated due to length.';
+          htmlContext = `${startChunk}\n\n...\n[BODY CONTENT TRUNCATED]\n...\n\n${endChunk}`;
+          htmlContextDescription = 'Sanitized <body> content provided, but truncated due to length.';
         }
       } else {
-        console.warn("Could not extract body content, falling back to start/end chunks of full HTML.");
-        const MAX_CHUNK_SIZE = 8000;
-        if (originalHtml.length <= MAX_CHUNK_SIZE * 2) {
-          htmlContext = originalHtml;
-          htmlContextDescription = 'Full HTML provided (could not extract body).';
-        } else {
-          const startChunk = originalHtml.substring(0, MAX_CHUNK_SIZE);
-          const endChunk = originalHtml.substring(originalHtml.length - MAX_CHUNK_SIZE);
-          htmlContext = `${startChunk}\n\n...\n[FULL HTML TRUNCATED IN THE MIDDLE]\n...\n\n${endChunk}`;
-          htmlContextDescription = 'Full HTML provided but truncated due to length (could not extract body).';
-        }
+        // Fallback if body extraction fails
+        htmlContext = 'Could not extract body content.';
+        htmlContextDescription = 'HTML provided but body extraction failed.';
       }
     }
     // --- End HTML Context Preparation ---
@@ -222,34 +180,30 @@ ${data.stackTrace || 'N/A'}
 
 
 Context:
-1. ${data.screenshotBase64
-        ? 'A screenshot of the web page at the time of the error is provided below. PLEASE PRIORITIZE THIS SCREENSHOT for visual analysis.'
-        : 'No screenshot is available.'
-      }
-2. Below is the HTML source code context, cleaned to remove scripts, styles, and unnecessary attributes. Note: ${htmlContextDescription}
+1. ${data.screenshotBase64 ? 'A screenshot of the web page at the time of error IS PROVIDED. **Prioritize visual analysis of the screenshot.**' : 'No screenshot is available.'}
+2. HTML source code context is provided below. Note: ${htmlContextDescription}
 
 Instructions:
-Based *primarily on the screenshot* (if provided) and secondarily on the provided HTML body content:
+Based *primarily on the screenshot* (if provided) and secondarily on the HTML context:
 
-1.  **Identify Element:** Clearly identify the specific UI element the test likely intended to interact with, given the failing selector (\`${data.failingSelector || 'N/A'}\`) and the error message. Describe its visual appearance and location *based on the screenshot*.
+1.  **Identify Element:** Clearly identify the specific UI element the test likely intended to interact with, given the failing selector (\`${data.failingSelector || 'N/A'}\`) and error. Describe its visual appearance and location *from the screenshot*. If no screenshot, infer from HTML.
 
-2.  **Suggest Playwright Locators (Prioritized):** Suggest 1-3 robust alternative locators for this element, following Playwright's recommended best practices in this order of preference:
-    * **a) User-Facing Attributes:** Target using \`getByRole\`, \`getByText\`, \`getByLabel\`, \`getByPlaceholder\`, \`getByAltText\`, or \`getByTitle\` based on visible/inferred attributes.
-    * **b) Test IDs:** Use \`getByTestId\` if stable \`data-testid\` (or similar) exists.
-    * **c) CSS or XPath (Fallback):** Suggest concise CSS/XPath if others aren't suitable. Prioritize stable attributes.
-    * Ensure suggestions aim for uniqueness and reliability.
+2.  **Suggest Playwright Locators (Prioritized):** Suggest 1-3 robust **alternative** locators for this element, following Playwright best practices (User-Facing > Test ID > CSS/XPath).
+    * Clearly label the type (e.g., "**User-Facing (Role):**").
+    * Format the locator code like \`page.getByRole(...)\`.
+    * Briefly explain the reasoning for *each* suggestion.
+    * Aim for uniqueness and stability.
 
-3.  **Explain Failure:** Provide a concise explanation of the *most likely* reason the original selector (\`${data.failingSelector || 'N/A'}\`) failed, consistent with the screenshot and HTML.
+3.  **Explain Failure:** Provide a concise explanation of the *most likely* reason the original selector (\`${data.failingSelector || 'N/A'}\`) failed, consistent with the screenshot/HTML.
 
-4.  **Format Output (Markdown):** Present the analysis using **Markdown** for clear, structured readability within an HTML report. Use level 3 headings (like \`-=== Heading ===-\`), bold text (like \`**bold**\`), inline code formatting (using single backticks like \`code\`), and lists. Structure the output into three distinct sections exactly as follows, separated by horizontal rules at the middle (\`-------------------------------------------------------------------------------------------------\`):
-    * \`-===  Element Identification\`
-    * \`-===  Suggested Locators\` (Use a numbered list, clearly label locator type, e.g., "**User-Facing:**", and format locator code with backticks like \`locator.code()\`)
-    * \`-===  Failure Explanation\`
+4.  **Format Output (Pure Markdown):** Present the analysis using **standard Markdown**. Use level 3 headings (e.g., \`### Element Identification\`), bold text (\`**bold**\`), inline code (\`code\`), and numbered/bullet lists. Structure into three sections separated by horizontal rules (\`---\`):
+    * \`### Element Identification\`
+    * \`### Suggested Locators\`
+    * \`### Failure Explanation\`
 
 === HTML Source Context ===
 ${htmlContext}
 === End HTML Source Context ===
-
 `; // End of textPrompt
 
     const promptParts: Part[] = [];
@@ -260,93 +214,52 @@ ${htmlContext}
       if (cleanedScreenshotData) {
         promptParts.push({
           inlineData: {
-            mimeType: 'image/png',
+            mimeType: 'image/png', // Assuming PNG, adjust if needed
             data: cleanedScreenshotData,
           },
         });
       }
     }
 
-    const result: GenerateContentResponse = await model.generateContent({
+    const apiResponse: GenerateContentResponse = await model.generateContent({
       contents: [{ role: "user", parts: promptParts }],
     });
 
-    // --- Response and Usage/Cost Processing ---
-    if (!result.response || result.response.promptFeedback?.blockReason) {
-      const blockReason = result.response?.promptFeedback?.blockReason;
-      const safetyRatings = JSON.stringify(result.response?.promptFeedback?.safetyRatings || {}, null, 2);
+    // --- Process Response ---
+    result.usageInfoMarkdown = processUsageAndCost(apiResponse.response?.usageMetadata);
 
-      // Return a formatted error box (wider)
-      const errorMsg = `AI analysis failed: No valid response generated.`;
-      const reasonMsg = `Reason: ${blockReason || 'Blocked/Unknown/Empty'}.`;
-      const checkMsg = `Check safety settings/prompt or API status.`;
-      return `
-${TOP_BORDER}
-${createCenteredHeader(" A I   E R R O R ")}
-${SEPARATOR}
-${wrapTextInBox(errorMsg)}
-${wrapTextInBox(reasonMsg)}
-${wrapTextInBox(checkMsg)}
-${wrapTextInBox(`Safety Ratings: ${safetyRatings}`)}
-${BOTTOM_BORDER}
-`;
+    if (!apiResponse.response || apiResponse.response.promptFeedback?.blockReason) {
+      const blockReason = apiResponse.response?.promptFeedback?.blockReason || 'Blocked/Unknown/Empty';
+      const safetyRatings = JSON.stringify(apiResponse.response?.promptFeedback?.safetyRatings || {}, null, 2);
+      result.errorMarkdown = `**AI Analysis Failed:** Response blocked or empty.\n\nReason: ${blockReason}\n\nCheck safety settings/prompt or API status.\n\n<details><summary>Safety Ratings</summary>\n\n\`\`\`json\n${safetyRatings}\n\`\`\`\n</details>`;
+      console.error("AI Response Blocked/Empty. Reason:", blockReason);
+    } else {
+      const responseText = apiResponse.response.text();
+      if (responseText) {
+        // Basic cleanup and ensure standard Markdown is used
+        result.analysisMarkdown = responseText.trim()
+          .replace(/-===(.*?)===-/g, '### $1')
+          .replace(/-------------------------------------------------------------------------------------------------/g, '\n---\n'); // Standard horizontal rules
+      } else {
+        result.analysisMarkdown = "*AI analysis returned no suggestions or an empty response.*";
+      }
     }
-
-    const responseText = result.response.text();
-
-    if (!responseText) {
-      // Still show cost even if response is empty
-      const analysisBoxContent = `
-${TOP_BORDER}
-${createCenteredHeader(" Gemini Analysis ")}
-${SEPARATOR}
-${wrapTextInBox("AI analysis returned no suggestions or an empty response.")}
-${BOTTOM_BORDER}
-`;
-      const costBoxContent = processUsageAndCost(result.response?.usageMetadata);
-      return analysisBoxContent + "\n" + costBoxContent;
-    }
-
-    // --- Calculate Cost and Format Usage Box ---
-    const costBoxContent = processUsageAndCost(result.response?.usageMetadata);
-    // --- End Cost Calculation and Formatting ---
-
-    const analysisBoxContent = `
-${TOP_BORDER}
-${createCenteredHeader(" Gemini Analysis ")}
-${SEPARATOR}
-${wrapTextInBox(responseText.trim())}
-${BOTTOM_BORDER}
-`;
-
-    return analysisBoxContent + "\n" + costBoxContent;
 
   } catch (error: any) {
-
-    const errorMsg = `Error during AI analysis: ${error.message}.`;
-    const checkMsg = `Check console logs for details.`;
-    return `
-${TOP_BORDER}
-${createCenteredHeader(" API Call Exception ")}
-${SEPARATOR}
-${wrapTextInBox(errorMsg)}
-${wrapTextInBox(checkMsg)}
-${BOTTOM_BORDER}
-`;
+    console.error("Error during AI API call:", error); // Log detailed error
+    result.errorMarkdown = `**API Call Exception:** Error during AI analysis: ${error.message}.\n\nCheck console logs for details.`;
   }
+
+  return result;
 }
 
 /**
- * Processes usage metadata and returns a formatted box string.
- * Uses the global BOX_WIDTH constant.
+ * Processes usage metadata and returns a formatted Markdown string for usage info.
  * @param usage UsageMetadata object from the API response.
- * @returns A string containing the formatted usage and cost box.
- *
- * Note: Our HTML cleaning reduces token usage by removing scripts, styles,
- * HTML comments, and unnecessary attributes, which lowers API costs.
+ * @returns A Markdown string for usage/cost, or null if unavailable.
  */
-function processUsageAndCost(usage: UsageMetadata | undefined): string {
-  let usageContentLines: string[] = [];
+function processUsageAndCost(usage: UsageMetadata | undefined): string | null {
+  if (!usage) return null;
 
   let promptTokens: number | undefined;
   let completionTokens: number | undefined;
@@ -355,68 +268,45 @@ function processUsageAndCost(usage: UsageMetadata | undefined): string {
   let estimatedCostString = "N/A";
   let currency = "USD";
 
-  if (usage) {
-    if (typeof usage.promptTokenCount === 'number' && typeof usage.candidatesTokenCount === 'number' && typeof usage.totalTokenCount === 'number') {
-      promptTokens = usage.promptTokenCount;
-      completionTokens = usage.candidatesTokenCount;
-      totalTokens = usage.totalTokenCount;
-      usageAvailable = true;
-    } else if (typeof usage.promptTokenCount === 'number' && typeof usage.totalTokenCount === 'number') {
-      promptTokens = usage.promptTokenCount;
-      totalTokens = usage.totalTokenCount;
-      completionTokens = totalTokens - promptTokens;
-      usageAvailable = true;
-    }
+  if (typeof usage.promptTokenCount === 'number' && typeof usage.candidatesTokenCount === 'number' && typeof usage.totalTokenCount === 'number') {
+    promptTokens = usage.promptTokenCount;
+    completionTokens = usage.candidatesTokenCount;
+    totalTokens = usage.totalTokenCount;
+    usageAvailable = true;
+  } else if (typeof usage.promptTokenCount === 'number' && typeof usage.totalTokenCount === 'number') {
+    promptTokens = usage.promptTokenCount;
+    totalTokens = usage.totalTokenCount;
+    completionTokens = totalTokens - promptTokens; // Calculate completion tokens
+    usageAvailable = true;
   }
 
   if (usageAvailable && promptTokens !== undefined && completionTokens !== undefined && totalTokens !== undefined) {
     const modelPricingInfo = MODEL_PRICING[MODEL_NAME];
-
     if (modelPricingInfo) {
       currency = modelPricingInfo.currency;
       const inputCost = (promptTokens / 1000) * modelPricingInfo.inputPer1k;
       const outputCost = (completionTokens / 1000) * modelPricingInfo.outputPer1k;
       const totalCost = inputCost + outputCost;
-      estimatedCostString = `$${totalCost.toFixed(5)} ${currency}`;
+      // Use a reasonable number of decimal places
+      estimatedCostString = `$${totalCost.toFixed(totalCost < 0.01 ? 6 : 4)} ${currency}`;
     } else {
       estimatedCostString = `N/A (pricing missing for ${MODEL_NAME})`;
     }
 
-    // Prepare content lines
-    usageContentLines = [
-      `Model Used: ${MODEL_NAME}`,
-      `Prompt Tokens: ${promptTokens}`,
-      `Completion Tokens: ${completionTokens}`,
-      `Total Tokens: ${totalTokens}`,
-      `Estimated Cost: ${estimatedCostString}`,
-      ``,
-      `(Note: Pricing as of March 2025, check ai.google.dev/pricing for latest rates)`
-    ];
+    // Return Markdown Table
+    return `
+| Category          | Value                  |
+|-------------------|------------------------|
+| **Model** | ${MODEL_NAME}          |
+| **Total Tokens** | ${totalTokens.toLocaleString()}  |
+| **Prompt Tokens** | ${promptTokens.toLocaleString()} |
+| **Comp. Tokens** | ${completionTokens.toLocaleString()}|
+| **Est. Cost** | ${estimatedCostString}     |
 
-  } else {
-    // Fallback message if usage info is missing or incomplete
-    if (usage) {
-      usageContentLines = [
-        `Model Used: ${MODEL_NAME}`,
-        `Usage information incomplete. Cost cannot be estimated.`
-      ];
-    } else {
-      usageContentLines = [
-        `Model Used: ${MODEL_NAME}`,
-        `Usage information not available. Cost cannot be estimated.`
-      ];
-    }
-  }
-
-  // Wrap all content lines
-  const wrappedUsageContent = usageContentLines.map(line => wrapTextInBox(line, 4)).join('\n'); // Indent content lines
-
-  // Final box string
-  return `
-${TOP_BORDER}
-${createCenteredHeader(" Usage & Estimated Cost ")}
-${SEPARATOR}
-${wrappedUsageContent}
-${BOTTOM_BORDER}
+*Pricing as of March 2025. Check [ai.google.dev/pricing](https://ai.google.dev/pricing) for latest rates.*
 `;
+  } else {
+    // Return simpler message if counts are missing
+    return `*Usage information incomplete or unavailable. Cost cannot be estimated.* (Model: ${MODEL_NAME})`;
+  }
 }
