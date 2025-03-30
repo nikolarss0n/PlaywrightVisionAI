@@ -1,10 +1,10 @@
-# Playwright AI Overlay
+# Playwright Vision AI
 
 An open-source tool that transforms Playwright test debugging with AI-powered visual analysis.
 
 ## What It Is
 
-Playwright AI Overlay captures screenshots, HTML, and error details when tests fail, then uses Gemini 1.5 to visually analyze what went wrong and suggest fixes.
+Playwright AI Overlay captures screenshots, HTML, and error details when tests fail, then uses AI models to visually analyze what went wrong and suggest fixes.
 
 ## Key Features
 
@@ -30,12 +30,6 @@ The main components:
 - Playwright Test setup
 - Google Gemini API key
 
-### Installation
-
-```bash
-npm install playwright-ai-overlay
-```
-
 ### Configuration
 
 1. Get a Google Gemini API key from the [Google AI Studio](https://makersuite.google.com/)
@@ -50,7 +44,7 @@ Replace your Playwright test imports with the AI-enhanced version:
 // import { test, expect } from '@playwright/test';
 
 // Use this:
-import { test, expect } from 'playwright-ai-overlay';
+import { test, expect } from './ai-test-base';
 
 // Write tests as normal
 test('my test', async ({ page }) => {
@@ -87,7 +81,7 @@ Screenshots of the implementation and results will be added soon!
 
 ## License
 
-This project is licensed under the ISC License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Contributing
 
