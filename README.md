@@ -1,10 +1,10 @@
 # Playwright Vision AI
 
-An open-source tool that transforms Playwright test debugging with AI-powered visual analysis.
+Transforms Playwright test debugging with AI-powered visual analysis.
 
 ## What It Is
 
-Playwright AI Overlay captures screenshots, HTML, and error details when tests fail, then uses AI models to visually analyze what went wrong and suggest fixes.
+Playwright Vision captures screenshots, HTML, and error details when tests fail, then uses AI models to visually analyze what went wrong and suggest fixes.
 
 ## Key Features
 
