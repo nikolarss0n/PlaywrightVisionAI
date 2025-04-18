@@ -2,9 +2,9 @@ import {
   GoogleGenerativeAI,
   HarmCategory,
   HarmBlockThreshold,
-  Part,
-  GenerateContentResponse,
-  UsageMetadata,
+  type Part,
+  type GenerateContentResult,
+  type UsageMetadata,
 } from "@google/generative-ai";
 import * as dotenv from 'dotenv';
 dotenv.config();
@@ -16,6 +16,7 @@ interface AiAnalysisInput {
   stackTrace?: string;
   failingSelector?: string;
   testTitle?: string;
+  testCode?: string; // Add the test code field to match src/index.ts
 }
 
 // --- Result structure from AI call ---
@@ -26,7 +27,7 @@ export interface AiDebuggingResult {
 }
 
 // --- IMPORTANT ---
-const apiKey: string | undefined = process.env.API_KEY;
+const apiKey: string | undefined = process.env.GEMINI_API_KEY;
 
 // --- SELECT MODEL ---
 export const MODEL_NAME = "gemini-1.5-pro-latest";
@@ -57,9 +58,9 @@ const generationConfig = {
 
 // --- Styling Configuration (Primarily for Console Fallback Now) ---
 export const BOX_WIDTH = 100;
-export const TOP_BORDER = '┌' + '─'.repeat(BOX_WIDTH) + '┐';
-export const BOTTOM_BORDER = '└' + '─'.repeat(BOX_WIDTH) + '┘';
-export const SEPARATOR = '├' + '─'.repeat(BOX_WIDTH) + '┤';
+export const TOP_BORDER = `┌${'─'.repeat(BOX_WIDTH)}┐`;
+export const BOTTOM_BORDER = `└${'─'.repeat(BOX_WIDTH)}┘`;
+export const SEPARATOR = `├${'─'.repeat(BOX_WIDTH)}┤`;
 
 // These helpers might still be useful for console logs, but not the primary output mechanism
 export function createStyledMarkdownBox(title: string, content: string, type: 'analysis' | 'usage' | 'error' = 'analysis'): string {
@@ -74,14 +75,14 @@ export function createCenteredHeader(text: string): string {
   const padding = Math.max(0, BOX_WIDTH - text.length);
   const leftPad = Math.floor(padding / 2);
   const rightPad = Math.ceil(padding / 2);
-  return '│' + ' '.repeat(leftPad) + text + ' '.repeat(rightPad) + '│';
+  return `│${' '.repeat(leftPad)}${text}${' '.repeat(rightPad)}│`;
 }
-export function wrapTextInBox(text: string, indent: number = 2): string {
+export function wrapTextInBox(text: string, indent = 2): string {
   const indentStr = ' '.repeat(indent);
   const maxLineLength = BOX_WIDTH - indent - 1;
   return text.split('\n').map(originalLine => {
     let currentLine = originalLine;
-    let resultLines: string[] = [];
+    const resultLines: string[] = [];
     while (currentLine.length > maxLineLength) {
       let breakPoint = currentLine.lastIndexOf(' ', maxLineLength);
       if (breakPoint <= 0) breakPoint = maxLineLength;
@@ -89,7 +90,7 @@ export function wrapTextInBox(text: string, indent: number = 2): string {
       currentLine = currentLine.substring(breakPoint).trimStart();
     }
     resultLines.push(currentLine);
-    return resultLines.map(subLine => '│' + indentStr + subLine.padEnd(BOX_WIDTH - indent) + '│').join('\n');
+    return resultLines.map(subLine => `│${indentStr}${subLine.padEnd(BOX_WIDTH - indent)}│`).join('\n');
   }).join('\n');
 }
 // --- End Styling Configuration ---
@@ -129,7 +130,7 @@ export async function callDebuggingAI(data: AiAnalysisInput): Promise<AiDebuggin
   };
 
   if (!apiKey) {
-    result.errorMarkdown = `**Configuration Error:** GOOGLE_API_KEY is not set. AI analysis cannot proceed.`;
+    result.errorMarkdown = "**Configuration Error:** GOOGLE_API_KEY is not set. AI analysis cannot proceed.";
     return result;
   }
 
@@ -208,6 +209,7 @@ ${data.testCode ? `4.  **Test Improvement Suggestions:** Review the test code an
     * Recommend additional assertions or validations
     * Suggest possible test extensions based on the UI shown in the screenshot
 
+/* Commented out architectural suggestions as they may not be effective without full project context
 5.  **Architectural Improvements:** Suggest the MOST BENEFICIAL architectural pattern(s) for this specific test, including:
     * Page Object Model (POM) - separate page interactions from test logic
     * Component Pattern - create reusable UI component abstractions
@@ -219,11 +221,12 @@ ${data.testCode ? `4.  **Test Improvement Suggestions:** Review the test code an
     * Explain WHY this pattern would benefit this specific test
     * Show a CONCRETE code example of how to refactor the test using this pattern
     * Focus on the 1-2 patterns that would most improve maintainability for this specific test
+*/
 ` : ''}
 
 6.  **Format Output (Pure Markdown):** Present the analysis using **standard Markdown**. Use level 3 headings (e.g., \`### Element Identification\`), bold text (\`**bold**\`), inline code (\`code\`), and numbered/bullet lists. 
 
-    Structure into ${data.testCode ? 'five' : 'three'} sections, EACH separated by horizontal rules (\`---\`):
+    Structure into ${data.testCode ? 'four' : 'three'} sections, EACH separated by horizontal rules (\`---\`):
     * \`### Element Identification\` (first section)
     * \`---\` (horizontal rule separator)
     * \`### Suggested Locators\` (second section)
@@ -231,8 +234,10 @@ ${data.testCode ? `4.  **Test Improvement Suggestions:** Review the test code an
     * \`### Failure Explanation\` (third section)
     ${data.testCode ? '* `---` (horizontal rule separator)' : ''}
     ${data.testCode ? '* `### Test Improvement Suggestions` (fourth section)' : ''}
+    /* Commented out architectural improvements section
     ${data.testCode ? '* `---` (horizontal rule separator)' : ''}
     ${data.testCode ? '* `### Architectural Improvements` (fifth section)' : ''}
+    */
     
     IMPORTANT: Insert a horizontal rule (---) BETWEEN EACH SECTION to ensure proper visual separation.
 
@@ -256,7 +261,7 @@ ${htmlContext}
       }
     }
 
-    const apiResponse: GenerateContentResponse = await model.generateContent({
+    const apiResponse: GenerateContentResult = await model.generateContent({
       contents: [{ role: "user", parts: promptParts }],
     });
 
@@ -280,9 +285,10 @@ ${htmlContext}
       }
     }
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error during AI API call:", error); // Log detailed error
-    result.errorMarkdown = `**API Call Exception:** Error during AI analysis: ${error.message}.\n\nCheck console logs for details.`;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    result.errorMarkdown = `**API Call Exception:** Error during AI analysis: ${errorMessage}.\n\nCheck console logs for details.`;
   }
 
   return result;
@@ -340,8 +346,8 @@ function processUsageAndCost(usage: UsageMetadata | undefined): string | null {
 
 *Pricing as of March 2025. Check [ai.google.dev/pricing](https://ai.google.dev/pricing) for latest rates.*
 `;
-  } else {
-    // Return simpler message if counts are missing
-    return `*Usage information incomplete or unavailable. Cost cannot be estimated.* (Model: ${MODEL_NAME})`;
   }
+  
+  // Return simpler message if counts are missing
+  return `*Usage information incomplete or unavailable. Cost cannot be estimated.* (Model: ${MODEL_NAME})`;
 }
