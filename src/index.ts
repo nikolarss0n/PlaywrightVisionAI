@@ -1,10 +1,10 @@
-import type { Page, TestInfo } from '@playwright/test';
-import { callDebuggingAI, AiDebuggingResult } from '../aiDebugger'; // Adjust path as needed
-import { extractSelectorFromError } from '../errorUtils'; // Adjust path as needed
+import type { Page, TestInfo, TestType } from '@playwright/test';
+import { callDebuggingAI, type AiDebuggingResult } from '../aiDebugger'; // Path adjusted for src directory
+import { extractSelectorFromError } from '../errorUtils'; // Path adjusted for src directory
 import * as fs from 'node:fs';
 import { marked } from 'marked';
 
-// Define the shape of the AI analysis input (remains the same)
+// Define the shape of the AI analysis input
 interface AiAnalysisInput {
   html?: string;
   screenshotBase64?: string;
@@ -12,7 +12,8 @@ interface AiAnalysisInput {
   stackTrace?: string;
   failingSelector?: string;
   testTitle?: string;
-  testCode?: string; // Add the test code content
+  testCode?: string; // The test code content
+  networkRequests?: string; // Network request data
 }
 
 /**
@@ -115,6 +116,73 @@ export async function runAiDebuggingAnalysis(page: Page, testInfo: TestInfo, err
       console.warn("⚠️ Could not extract test code.");
     }
 
+    // Extract network requests from page's network data
+    let networkRequests = '';
+    try {
+      // Try to get requests from internal Playwright data structure
+      const requestsFromContext = page.context();
+      
+      // Check for request logs in test attachments first
+      const requestsLog = testInfo.attachments.filter(a => a.name.includes('request'));
+      if (requestsLog.length > 0) {
+        console.log("✅ Network requests found in test attachments.");
+        
+        // Try to read the content of the attachment logs
+        try {
+          const requestAttachments = [];
+          for (const attachment of requestsLog) {
+            if (attachment.path) {
+              try {
+                const content = fs.readFileSync(attachment.path, 'utf8');
+                requestAttachments.push(content);
+              } catch (err) {
+                // Skip if file can't be read
+              }
+            }
+          }
+          
+          if (requestAttachments.length > 0) {
+            networkRequests = requestAttachments.join('\n\n');
+          } else {
+            networkRequests = `Test contained ${requestsLog.length} network request logs, but content could not be read.`;
+          }
+        } catch (readError) {
+          networkRequests = `Test contained ${requestsLog.length} network request logs, but an error occurred reading them.`;
+        }
+      } else {
+        // If no request logs, try to extract data from _requestResponseInfo in the browser context
+        console.log("⚠️ No request logs found in test attachments. Attempting alternative extraction...");
+        
+        // Extract requests from HAR data if it exists
+        const harPath = testInfo.outputPath('trace.har');
+        if (fs.existsSync(harPath)) {
+          try {
+            const harContent = fs.readFileSync(harPath, 'utf8');
+            const harData = JSON.parse(harContent);
+            if (harData.log?.entries) {
+              const lastRequests = harData.log.entries.slice(-20); // Get last 20 entries
+              networkRequests = JSON.stringify(lastRequests, null, 2);
+              console.log(`✅ Extracted ${lastRequests.length} requests from HAR file.`);
+            }
+          } catch (harError) {
+            console.warn(`⚠️ Error parsing HAR file: ${harError instanceof Error ? harError.message : String(harError)}`);
+          }
+        } else {
+          // Last resort: check if any trace info is available
+          const traceFiles = testInfo.attachments.filter(a => a.name.includes('trace') || a.contentType === 'application/zip');
+          if (traceFiles.length > 0) {
+            networkRequests = `Test contains ${traceFiles.length} trace files which may contain network requests. Use Playwright Trace Viewer to examine them.`;
+          } else {
+            networkRequests = "No network requests captured. Consider using page.route() or page.context().route() to log requests in your test.";
+          }
+        }
+      }
+    } catch (networkError: unknown) {
+      const errorMessage = networkError instanceof Error ? networkError.message : String(networkError);
+      console.warn(`⚠️ Could not capture network requests: ${errorMessage}`);
+      networkRequests = `Error capturing network requests: ${errorMessage}`;
+    }
+
     // --- Prepare AI Input ---
     const aiInput: AiAnalysisInput = {
       html: html,
@@ -123,7 +191,8 @@ export async function runAiDebuggingAnalysis(page: Page, testInfo: TestInfo, err
       stackTrace: stackTrace,
       failingSelector: failingSelector || undefined,
       testTitle: testInfo.title,
-      testCode: testCode // Include the test code
+      testCode: testCode, // Include the test code
+      networkRequests: networkRequests // Include network request data
     };
 
     // --- Call AI ---
@@ -416,4 +485,50 @@ export async function runAiDebuggingAnalysis(page: Page, testInfo: TestInfo, err
 }
 
 // Re-export AiDebuggingResult for type hinting in consuming projects
-export { AiDebuggingResult };
+export type { AiDebuggingResult };
+
+/**
+ * Sets up AI debugging for a test suite by attaching the debugging hook to failed tests.
+ * This function should be called within a test file, not at the module level of imported files.
+ *
+ * @example
+ * // In your test file:
+ * import { test } from './your-test-setup';
+ * import { setupAiDebugging } from 'playwright-vision-ai-debugger';
+ *
+ * // Setup AI debugging for this test file
+ * setupAiDebugging(test);
+ *
+ * test('my test', async ({ page }) => {
+ *   // your test code
+ * });
+ */
+/**
+ * Sets up AI debugging for a test suite.
+ * @param testInstance The test instance to attach the debugging hook to
+ */
+// Intentionally using less strict types to support various test fixture structures
+// biome-ignore lint/suspicious/noExplicitAny: needed for compatibility with different fixture shapes
+export function setupAiDebugging(testInstance: unknown): void {
+  // Cast to a minimal interface that matches the test.afterEach structure
+  // biome-ignore lint/suspicious/noExplicitAny: needed for test framework compatibility
+  const test = testInstance as { afterEach: (fn: (fixtures: Record<string, unknown>, testInfo: Record<string, unknown>) => Promise<void>) => void };
+  
+  test.afterEach(async (fixtures: Record<string, unknown>, testInfo: Record<string, unknown>) => {
+    // Only run for failed tests with an error and page object
+    if (testInfo.status === 'failed' && testInfo.error && fixtures.page) {
+      try {
+        // Convert the error to ensure it has the right properties
+        const error = testInfo.error instanceof Error
+          ? testInfo.error
+          : new Error(String(testInfo.error));
+        
+        // Cast page and testInfo to appropriate types for the analysis function
+        const page = fixtures.page as Page;
+        await runAiDebuggingAnalysis(page, testInfo as unknown as TestInfo, error);
+      } catch (e) {
+        console.error('Error in AI debugging:', e);
+      }
+    }
+  });
+}

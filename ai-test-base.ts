@@ -1,8 +1,10 @@
-import { test as baseTest, expect, Page, TestInfo } from '@playwright/test';
+import { test as baseTest } from '@playwright/test';
+import type { Page, TestInfo } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { marked } from 'marked'; // Ensure marked is installed: npm install marked @types/marked
 import {
   callDebuggingAI,
-  AiDebuggingResult,
+  type AiDebuggingResult,
   // Console logging helpers (optional but kept for console output)
   TOP_BORDER,
   BOTTOM_BORDER,
@@ -11,7 +13,7 @@ import {
   wrapTextInBox,
 } from './aiDebugger'; // Assuming './aiDebugger.ts'
 import { extractSelectorFromError } from './errorUtils'; // Assuming './errorUtils.ts'
-import * as fs from 'fs';
+import * as fs from 'node:fs';
 
 // Define the shape of the AI analysis input (remains the same)
 interface AiAnalysisInput {
@@ -22,6 +24,7 @@ interface AiAnalysisInput {
   failingSelector?: string;
   testTitle?: string;
   testCode?: string; // Add the test code content
+  networkRequests?: string; // Network request logs
 }
 
 // Helper function to escape HTML characters (remains the same)
@@ -56,8 +59,9 @@ function extractTestCode(testInfo: TestInfo): string | undefined {
     // the specific test based on test title, but that's more complex
     // since tests can have complex structures (nested describes, etc.)
     return fileContent;
-  } catch (error: any) {
-    console.warn(`⚠️ Error extracting test code: ${error.message}`);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn(`⚠️ Error extracting test code: ${errorMessage}`);
     return undefined;
   }
 }
@@ -65,9 +69,88 @@ function extractTestCode(testInfo: TestInfo): string | undefined {
 // Extend the base test object
 export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
 
+  // Browser context options
+  async context({ context }, use, testInfo) {
+    // Start tracing before using the context
+    await context.tracing.start({
+      screenshots: true,
+      snapshots: true,
+      sources: true
+    });
+    
+    await use(context);
+    
+    // After the test runs, stop tracing and save to a file
+    if (testInfo.status !== 'passed') {
+      await context.tracing.stop({
+        path: testInfo.outputPath('trace.zip')
+      });
+    } else {
+      await context.tracing.stop();
+    }
+  },
+
   // Define an afterEach hook
   async page({ page }, use, testInfo: TestInfo) {
-    // Run the test using the original page fixture
+    // Store captured network requests
+    const networkRequests: Array<{
+      url: string;
+      method: string;
+      status?: number;
+      timestamp: string;
+      requestHeaders?: Record<string, string>;
+      responseHeaders?: Record<string, string>;
+    }> = [];
+    
+    // Store request-response pairs for correlation
+    const requestMap = new Map<string, {
+      url: string;
+      method: string;
+      timestamp: string;
+      requestHeaders: Record<string, string>;
+    }>();
+    
+    // Generate a unique ID counter
+    let requestCounter = 0;
+    
+    // Listen for network requests
+    page.on('request', request => {
+      const uniqueId = `req_${++requestCounter}`;
+      const timestamp = new Date().toISOString();
+      
+      // Only track important network requests (not images, fonts, etc.)
+      if (
+        request.resourceType() === 'xhr' ||
+        request.resourceType() === 'fetch' ||
+        request.resourceType() === 'document'
+      ) {
+        requestMap.set(request.url(), {
+          url: request.url(),
+          method: request.method(),
+          timestamp,
+          requestHeaders: request.headers()
+        });
+      }
+    });
+    
+    // Listen for responses
+    page.on('response', response => {
+      const url = response.url();
+      const requestData = requestMap.get(url);
+      
+      if (requestData) {
+        networkRequests.push({
+          ...requestData,
+          status: response.status(),
+          responseHeaders: response.headers()
+        });
+        
+        // Remove from map to avoid duplicate entries
+        requestMap.delete(url);
+      }
+    });
+    
+    // Run the test
     await use(page);
 
     // --- This code runs AFTER the test body has finished ---
@@ -75,8 +158,8 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
       // Check if there's an error object and the page is still open
       if (testInfo.error && !page.isClosed()) {
         let aiAnalysisResult: AiDebuggingResult | null = null; // To store AI result
-        let aiAnalysisHtml: string = '<p>AI Analysis could not be performed.</p>'; // Default HTML content
-        let usageInfoHtml: string = ''; // Default usage HTML
+        let aiAnalysisHtml = '<p>AI Analysis could not be performed.</p>'; // Default HTML content
+        let usageInfoHtml = ''; // Default usage HTML
 
         try {
           // --- Context Gathering ---
@@ -92,17 +175,21 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
           const startTime = Date.now();
           let html: string | undefined;
           let screenshotBase64: string | undefined;
-          let errorMsg: string;
-          let stackTrace: string | undefined;
-          let failingSelector: string | null | undefined;
+          // Variables to store error details
+          let errorMsg = '';
+          const stackTrace: string | undefined = testInfo.error.stack;
+          const failingSelector: string | null | undefined = extractSelectorFromError(
+            testInfo.error as unknown as Error
+          ); // Use the utility function
 
           // Capture HTML content
           try {
             html = await page.content();
             console.log("✅ HTML content captured.");
-          } catch (htmlError: any) {
-            console.warn(`⚠️ Could not capture HTML content: ${htmlError.message}`);
-            html = `Error capturing HTML: ${htmlError.message}`;
+          } catch (htmlError: unknown) {
+            const errorMessage = htmlError instanceof Error ? htmlError.message : String(htmlError);
+            console.warn(`⚠️ Could not capture HTML content: ${errorMessage}`);
+            html = `Error capturing HTML: ${errorMessage}`;
           }
 
           // Capture Screenshot
@@ -110,15 +197,14 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
             const screenshotBuffer = await page.screenshot({ fullPage: true });
             screenshotBase64 = screenshotBuffer.toString('base64');
             console.log("✅ Screenshot captured.");
-          } catch (screenshotError: any) {
-            console.warn(`⚠️ Could not capture screenshot: ${screenshotError.message}`);
+          } catch (screenshotError: unknown) {
+            const errorMessage = screenshotError instanceof Error ? screenshotError.message : String(screenshotError);
+            console.warn(`⚠️ Could not capture screenshot: ${errorMessage}`);
             screenshotBase64 = undefined; // Indicate screenshot failed
           }
 
           // Extract Error Details
           errorMsg = testInfo.error.message || 'No error message provided.';
-          stackTrace = testInfo.error.stack;
-          failingSelector = extractSelectorFromError(testInfo.error); // Use the utility function
 
           const contextTime = Date.now() - startTime;
           console.log(`✅ Context gathered in ${contextTime}ms.`);
@@ -134,6 +220,46 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
             console.warn("⚠️ Could not extract test code.");
           }
 
+          // --- Prepare Network Requests Data ---
+          let networkRequestsData = "No network requests captured.";
+          if (networkRequests.length > 0) {
+            // Limit to last 20 requests if there are too many
+            const relevantRequests = networkRequests.slice(-20);
+            
+            // Format nicely for AI analysis
+            const formattedRequests = relevantRequests.map(req => ({
+              url: req.url,
+              method: req.method,
+              status: req.status || 'No status',
+              timestamp: req.timestamp,
+              requestHeaders: req.requestHeaders ?
+                Object.fromEntries(
+                  Object.entries(req.requestHeaders)
+                    .filter(([key]) => ['content-type', 'authorization', 'accept'].includes(key.toLowerCase()))
+                ) : {},
+              responseHeaders: req.responseHeaders ?
+                Object.fromEntries(
+                  Object.entries(req.responseHeaders)
+                    .filter(([key]) => ['content-type'].includes(key.toLowerCase()))
+                ) : {}
+            }));
+            
+            networkRequestsData = JSON.stringify(formattedRequests, null, 2);
+            console.log(`✅ Captured ${formattedRequests.length} network requests from test execution.`);
+          } else {
+            // Try to get network requests from trace
+            try {
+              const tracePath = testInfo.outputPath('trace.zip');
+              if (fs.existsSync(tracePath)) {
+                networkRequestsData = `Network requests are available in the trace file. Use 'npx playwright show-trace ${tracePath}' to view them.`;
+              } else {
+                console.warn("⚠️ No network requests were captured during test execution.");
+              }
+            } catch (error) {
+              console.warn("⚠️ No network requests were captured during test execution.");
+            }
+          }
+
           // --- Prepare AI Input ---
           const aiInput: AiAnalysisInput = {
             html: html,
@@ -142,7 +268,8 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
             stackTrace: stackTrace,
             failingSelector: failingSelector || undefined,
             testTitle: testInfo.title,
-            testCode: testCode // Include the test code
+            testCode: testCode, // Include the test code
+            networkRequests: networkRequestsData // Include network request data
           };
 
           // --- Call AI *BEFORE* Generating HTML Report ---
@@ -368,8 +495,43 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
             </div>
         </div>
 
+        ${networkRequests.length > 0 ? `
+        <div class="glass-effect rounded-2xl max-w-3xl w-full">
+           <h3 class="text-lg md:text-xl font-semibold text-gray-50 mb-3">Network Requests</h3>
+           <p class="text-sm md:text-base leading-relaxed text-gray-200 mb-3">
+               The following network requests were captured during test execution.
+           </p>
+           <div class="overflow-x-auto">
+               <table class="w-full text-sm text-left text-gray-200">
+                   <thead class="text-xs uppercase bg-gray-800 bg-opacity-50 text-gray-300">
+                       <tr>
+                           <th class="px-4 py-2">Method</th>
+                           <th class="px-4 py-2">URL</th>
+                           <th class="px-4 py-2">Status</th>
+                           <th class="px-4 py-2">Content-Type</th>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       ${networkRequests.map(req => `
+                       <tr class="bg-gray-800 bg-opacity-20 border-b border-gray-700">
+                           <td class="px-4 py-2 font-medium ${req.method === 'GET' ? 'text-blue-300' : req.method === 'POST' ? 'text-green-300' : req.method === 'PUT' ? 'text-yellow-300' : req.method === 'DELETE' ? 'text-red-300' : 'text-gray-300'}">${escapeHtml(req.method)}</td>
+                           <td class="px-4 py-2 font-mono text-xs overflow-hidden overflow-ellipsis" style="max-width: 200px;">${escapeHtml(req.url)}</td>
+                           <td class="px-4 py-2 ${(req.status && req.status >= 200 && req.status < 300) ? 'text-green-300' : (req.status && req.status >= 400) ? 'text-red-300' : 'text-gray-300'}">${req.status || 'N/A'}</td>
+                           <td class="px-4 py-2 font-mono text-xs">${escapeHtml(req.responseHeaders?.['content-type'] || 'N/A')}</td>
+                       </tr>
+                       `).join('')}
+                   </tbody>
+               </table>
+           </div>
+           <details class="mt-4">
+               <summary class="cursor-pointer text-gray-300 hover:text-white">View Raw Network Data</summary>
+               <pre class="mt-2 bg-gray-800 bg-opacity-50 p-3 rounded text-xs overflow-x-auto">${escapeHtml(JSON.stringify(networkRequests, null, 2))}</pre>
+           </details>
+        </div>
+        ` : ''}
+
          <div class="glass-effect rounded-2xl max-w-3xl w-full">
-            <h3 class="text-lg md:text-xl font-semibold text-gray-50 mb-4">AI Debugging Analysis</h3>
+           <h3 class="text-lg md:text-xl font-semibold text-gray-50 mb-4">AI Debugging Analysis</h3>
             <div class="ai-content-area text-sm md:text-base leading-relaxed text-gray-200">
                 ${aiAnalysisHtml}
             </div>
@@ -396,14 +558,15 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
               contentType: 'text/html',
             });
             console.log(`✅ Successfully attached 'ai-debug-analysis.html' report.`);
-          } catch (attachError: any) {
-            console.error(`\n❌ Error attaching HTML report: ${attachError.message}`, attachError);
+          } catch (attachError: unknown) {
+            const errorMessage = attachError instanceof Error ? attachError.message : String(attachError);
+            console.error(`\n❌ Error attaching HTML report: ${errorMessage}`, attachError);
           }
 
           // --- Log AI analysis completion to console, but don't modify error stack ---
           console.log(`\n${SEPARATOR}\n${createCenteredHeader("💡 AI Debugging Complete 💡")}\n${SEPARATOR}`);
-          console.log(`AI analysis results attached to test report.`);
-          console.log(`View HTML report and markdown attachment for details.`);
+          console.log("AI analysis results attached to test report.");
+          console.log("View HTML report and markdown attachment for details.");
 
           // --- Optional: Attach raw markdown as separate text file ---
           try {
@@ -413,28 +576,32 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
               contentType: 'text/markdown',
             });
             console.log(`✅ Successfully attached 'ai-suggestions-raw.md'.`);
-          } catch (attachError: any) {
-            console.warn(`⚠️ Could not attach AI suggestions as markdown file: ${attachError.message}`);
+          } catch (attachError: unknown) {
+            const errorMessage = attachError instanceof Error ? attachError.message : String(attachError);
+            console.warn(`⚠️ Could not attach AI suggestions as markdown file: ${errorMessage}`);
           }
 
-        } catch (captureError: any) {
+        } catch (captureError: unknown) {
           // --- Log Overall Capture/Processing Error ---
-          console.error(`\n❌ Critical error during failure processing: ${captureError.message}`, captureError);
+          const errorMessage = captureError instanceof Error ? captureError.message : String(captureError);
+          console.error(`\n❌ Critical error during failure processing: ${errorMessage}`, captureError);
           const captureErrorBox = `
 ${TOP_BORDER}
 ${createCenteredHeader("❌ Context Capture/Processing Error ❌")}
 ${SEPARATOR}
-${wrapTextInBox(`Failed to capture context, generate report, or call AI.`)}
-${wrapTextInBox(`Error: ${captureError?.message || captureError}`)}
+${wrapTextInBox("Failed to capture context, generate report, or call AI.")}
+${wrapTextInBox(`Error: ${errorMessage}`)}
 ${BOTTOM_BORDER}
 `;
           console.error(captureErrorBox);
           // Log error but don't modify stack trace
-          console.error(`Context capture or AI processing failed: ${captureError?.message || captureError}`);
+          console.error(`Context capture or AI processing failed: ${errorMessage}`);
           // Attempt to attach a basic error report
           try {
             await testInfo.attach('ai-processing-error.txt', {
-              body: `Error during AI analysis: ${captureError?.message || captureError}\n\nStack trace: ${captureError?.stack || 'No stack trace available'}`,
+              body: `Error during AI analysis: ${errorMessage}\n\nStack trace: ${
+                captureError instanceof Error ? captureError.stack : 'No stack trace available'
+              }`,
               contentType: 'text/plain',
             });
           } catch (e) {
@@ -446,7 +613,7 @@ ${BOTTOM_BORDER}
         console.warn(`\n${TOP_BORDER}`);
         console.warn(createCenteredHeader("⚠️ Page Closed Warning ⚠️"));
         console.warn(`${SEPARATOR}`);
-        console.warn(wrapTextInBox("Page was closed before context could be captured for AI analysis. Test: " + testInfo.title));
+        console.warn(wrapTextInBox(`Page was closed before context could be captured for AI analysis. Test: ${testInfo.title}`));
         console.warn(`${BOTTOM_BORDER}`);
         // Log warning but don't modify error stack
         try {

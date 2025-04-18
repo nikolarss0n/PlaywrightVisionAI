@@ -11,6 +11,7 @@ Playwright Vision AI Debugger captures screenshots, HTML, and error details when
 - **Visual Element Detection**: Identifies UI elements in screenshots
 - **Smart Selector Recommendations**: Suggests better selectors following Playwright best practices
 - **Root Cause Analysis**: Explains why your tests failed in plain language
+- **Network Request Analysis**: Examines API calls and XHR requests to identify backend issues
 - **Beautiful Glass UI Reports**: Generates elegant HTML reports with detailed analysis
 - **Token Optimization**: Cleans HTML to reduce token usage and minimize API costs
 - **Test Code Context**: Includes the failing test code for better debugging context
@@ -63,7 +64,14 @@ If you're working on this package locally or want to use it before publishing to
    - Create a `.env` file in your project root with:
      ```
      GEMINI_API_KEY=your-api-key-here
+     GEMINI_MODEL_NAME=gemini-1.5-pro-latest  # Optional: Change the AI model
      ```
+   - Available models (any Gemini model with vision capabilities works):
+     - `gemini-1.5-pro-latest` (default) - Latest Pro model with best capabilities
+     - `gemini-1.5-flash-latest` - Faster and lower cost
+     - `gemini-1.5-pro-vision` - Specialized vision model
+     - `gemini-pro-vision` - 1.0 vision model
+     - Other Gemini models with vision capabilities
 
 2. **Install dotenv:**
    ```bash
@@ -130,6 +138,13 @@ After running your tests:
 3. Find the "ai-debug-analysis.html" attachment
 4. Click to view the AI analysis report
 
+The AI analysis includes:
+- Screenshot analysis with element identification
+- Better locator suggestions
+- Failure explanation
+- Network request analysis (API calls, XHR requests)
+- Test code improvement suggestions
+
 ## Example Output
 
 When a test fails, you'll see detailed AI analysis in your test report:
@@ -183,7 +198,7 @@ If you encounter "Cannot find module 'playwright-vision-ai-debugger'" errors whe
    npm link playwright-vision-ai-debugger
    ```
 
-### API Key Issues
+### API Key and Model Selection
 
 If you see "Configuration Error: GEMINI_API_KEY is not set":
 
@@ -194,6 +209,20 @@ If you see "Configuration Error: GEMINI_API_KEY is not set":
    import dotenv from 'dotenv';
    dotenv.config();
    ```
+
+To change the AI model:
+1. Add `GEMINI_MODEL_NAME` to your `.env` file:
+   ```
+   GEMINI_MODEL_NAME=gemini-1.5-flash-latest
+   ```
+2. You can use any Gemini model with vision capabilities:
+   - `gemini-1.5-pro-latest` (default) - Latest Pro model with best capabilities
+   - `gemini-1.5-flash-latest` - Faster analysis, lower cost
+   - `gemini-1.5-pro-vision` - Specialized vision model
+   - `gemini-pro-vision` - 1.0 vision model
+   - Any other Gemini model with multimodal/vision support
+
+3. The pricing will automatically adjust based on the model you select.
 
 ## License
 
