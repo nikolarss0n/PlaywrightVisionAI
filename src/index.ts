@@ -2,6 +2,7 @@ import type { Page, TestInfo, TestType } from '@playwright/test';
 import { callDebuggingAI, type AiDebuggingResult } from '../aiDebugger'; // Path adjusted for src directory
 import { extractSelectorFromError } from '../errorUtils'; // Path adjusted for src directory
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { marked } from 'marked';
 
 // Define the shape of the AI analysis input
@@ -119,61 +120,113 @@ export async function runAiDebuggingAnalysis(page: Page, testInfo: TestInfo, err
     // Extract network requests from page's network data
     let networkRequests = '';
     try {
-      // Try to get requests from internal Playwright data structure
-      const requestsFromContext = page.context();
+      // Access the network requests data through the page object
+      // @ts-expect-error - Accessing private property for debugging purposes
+      const requestsData = page._requestsData;
       
-      // Check for request logs in test attachments first
-      const requestsLog = testInfo.attachments.filter(a => a.name.includes('request'));
-      if (requestsLog.length > 0) {
-        console.log("✅ Network requests found in test attachments.");
+      if (requestsData && Array.isArray(requestsData) && requestsData.length > 0) {
+        // We've found network requests stored on the page object
+        console.log(`✅ Found ${requestsData.length} network requests on page object.`);
         
-        // Try to read the content of the attachment logs
         try {
-          const requestAttachments = [];
-          for (const attachment of requestsLog) {
-            if (attachment.path) {
+          // Format the requests for analysis
+          const formattedRequests = requestsData
+            .filter(req => req && typeof req === 'object')
+            .map(req => ({
+              url: req.url || 'unknown',
+              method: req.method || 'unknown',
+              status: req.status,
+              resourceType: req.resourceType || 'unknown',
+              failed: req.failed || false,
+              errorText: req.errorText,
+              timing: req.timing || {},
+              requestHeaders: req.requestHeaders || {},
+              responseHeaders: req.responseHeaders || {},
+              postData: req.postData,
+              responseBody: req.responseBody
+            }));
+          
+          networkRequests = JSON.stringify(formattedRequests, null, 2);
+          console.log(`✅ Successfully formatted ${formattedRequests.length} network requests from page data.`);
+        } catch (err) {
+          console.warn(`⚠️ Error formatting network requests from page: ${err instanceof Error ? err.message : String(err)}`);
+          // Fall through to next method
+        }
+      }
+      
+      if (networkRequests === "No network requests captured.") {
+        // Fallback to attached network-requests.json file
+        const networkRequestLog = testInfo.attachments.find(a => a.name === 'network-requests.json');
+        
+        if (networkRequestLog?.path) {
+          console.log("✅ Found network-requests.json attachment.");
+          
+          try {
+            // Read the content as JSON
+            const content = fs.readFileSync(networkRequestLog.path, 'utf8');
+            // Use the content directly since it's already properly formatted
+            networkRequests = content;
+            console.log("✅ Successfully loaded network request data from attachment.");
+          } catch (err) {
+            console.warn(`⚠️ Error reading network-requests.json: ${err instanceof Error ? err.message : String(err)}`);
+            networkRequests = `Error reading network-requests.json: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        }
+        // Fallback to any attachment with 'request' in the name
+        else {
+          const requestsLog = testInfo.attachments.filter(a => a.name.includes('request'));
+          if (requestsLog.length > 0) {
+            console.log("✅ Found other network request attachments.");
+            
+            // Try to read the content of the attachment logs
+            try {
+              const requestAttachments = [];
+              for (const attachment of requestsLog) {
+                if (attachment.path) {
+                  try {
+                    const content = fs.readFileSync(attachment.path, 'utf8');
+                    requestAttachments.push(content);
+                  } catch (err) {
+                    // Skip if file can't be read
+                  }
+                }
+              }
+              
+              if (requestAttachments.length > 0) {
+                networkRequests = requestAttachments.join('\n\n');
+              } else {
+                networkRequests = `Test contained ${requestsLog.length} network request logs, but content could not be read.`;
+              }
+            } catch (readError) {
+              networkRequests = `Test contained ${requestsLog.length} network request logs, but an error occurred reading them.`;
+            }
+          } else {
+            // If no request logs, try to extract data from HAR data
+            console.log("⚠️ No request logs found in test attachments. Attempting alternative extraction...");
+            
+            // Extract requests from HAR data if it exists
+            const harPath = testInfo.outputPath('trace.har');
+            if (fs.existsSync(harPath)) {
               try {
-                const content = fs.readFileSync(attachment.path, 'utf8');
-                requestAttachments.push(content);
-              } catch (err) {
-                // Skip if file can't be read
+                const harContent = fs.readFileSync(harPath, 'utf8');
+                const harData = JSON.parse(harContent);
+                if (harData.log?.entries) {
+                  const lastRequests = harData.log.entries.slice(-20); // Get last 20 entries
+                  networkRequests = JSON.stringify(lastRequests, null, 2);
+                  console.log(`✅ Extracted ${lastRequests.length} requests from HAR file.`);
+                }
+              } catch (harError) {
+                console.warn(`⚠️ Error parsing HAR file: ${harError instanceof Error ? harError.message : String(harError)}`);
+              }
+            } else {
+              // Last resort: check if any trace info is available
+              const traceFiles = testInfo.attachments.filter(a => a.name.includes('trace') || a.contentType === 'application/zip');
+              if (traceFiles.length > 0) {
+                networkRequests = `Test contains ${traceFiles.length} trace files which may contain network requests. Use Playwright Trace Viewer to examine them.`;
+              } else {
+                networkRequests = "No network requests captured. Consider using page.route() or page.context().route() to log requests in your test.";
               }
             }
-          }
-          
-          if (requestAttachments.length > 0) {
-            networkRequests = requestAttachments.join('\n\n');
-          } else {
-            networkRequests = `Test contained ${requestsLog.length} network request logs, but content could not be read.`;
-          }
-        } catch (readError) {
-          networkRequests = `Test contained ${requestsLog.length} network request logs, but an error occurred reading them.`;
-        }
-      } else {
-        // If no request logs, try to extract data from _requestResponseInfo in the browser context
-        console.log("⚠️ No request logs found in test attachments. Attempting alternative extraction...");
-        
-        // Extract requests from HAR data if it exists
-        const harPath = testInfo.outputPath('trace.har');
-        if (fs.existsSync(harPath)) {
-          try {
-            const harContent = fs.readFileSync(harPath, 'utf8');
-            const harData = JSON.parse(harContent);
-            if (harData.log?.entries) {
-              const lastRequests = harData.log.entries.slice(-20); // Get last 20 entries
-              networkRequests = JSON.stringify(lastRequests, null, 2);
-              console.log(`✅ Extracted ${lastRequests.length} requests from HAR file.`);
-            }
-          } catch (harError) {
-            console.warn(`⚠️ Error parsing HAR file: ${harError instanceof Error ? harError.message : String(harError)}`);
-          }
-        } else {
-          // Last resort: check if any trace info is available
-          const traceFiles = testInfo.attachments.filter(a => a.name.includes('trace') || a.contentType === 'application/zip');
-          if (traceFiles.length > 0) {
-            networkRequests = `Test contains ${traceFiles.length} trace files which may contain network requests. Use Playwright Trace Viewer to examine them.`;
-          } else {
-            networkRequests = "No network requests captured. Consider using page.route() or page.context().route() to log requests in your test.";
           }
         }
       }
@@ -439,29 +492,74 @@ export async function runAiDebuggingAnalysis(page: Page, testInfo: TestInfo, err
 </html>
 `; // --- End HTML Generation ---
 
-    // --- Attach the FINAL HTML Report ---
+    // --- Attach the FINAL HTML Report to Playwright report and save it to disk ---
     try {
+      // 1. Attach to Playwright HTML report as before
       await testInfo.attach('ai-debug-analysis.html', {
         body: glassmorphismHtml,
         contentType: 'text/html',
       });
-      console.log(`✅ Successfully attached 'ai-debug-analysis.html' report.`);
+      console.log(`✅ Successfully attached 'ai-debug-analysis.html' report to test results.`);
+      
+      // 2. Create an additional copy in the test outputs directory
+      const testOutputDir = testInfo.outputDir;
+      const testTitle = testInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      const outputPath = path.join(testOutputDir, `ai-debug-${testTitle}.html`);
+      
+      fs.writeFileSync(outputPath, glassmorphismHtml, 'utf8');
+      console.log(`✅ Saved HTML report to disk at: ${outputPath}`);
+      
+      // 3. Save another copy in a top-level debug directory (if one exists)
+      const projectRoot = process.cwd();
+      const debugDirPath = path.join(projectRoot, 'test-debug');
+      
+      // Create the directory if it doesn't exist
+      if (!fs.existsSync(debugDirPath)) {
+        try {
+          fs.mkdirSync(debugDirPath, { recursive: true });
+        } catch (mkdirError) {
+          console.warn(`⚠️ Could not create debug directory: ${String(mkdirError)}`);
+        }
+      }
+      
+      if (fs.existsSync(debugDirPath)) {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const debugPath = path.join(debugDirPath, `ai-debug-${testTitle}-${timestamp}.html`);
+        
+        try {
+          fs.writeFileSync(debugPath, glassmorphismHtml, 'utf8');
+          console.log(`✅ Saved HTML report to debug directory: ${debugPath}`);
+        } catch (writeError) {
+          console.warn(`⚠️ Could not write to debug directory: ${String(writeError)}`);
+        }
+      }
     } catch (attachError: unknown) {
       const errorMessage = attachError instanceof Error ? attachError.message : String(attachError);
-      console.error(`\n❌ Error attaching HTML report: ${errorMessage}`, attachError);
+      console.error(`\n❌ Error attaching or saving HTML report: ${errorMessage}`, attachError);
     }
 
-    // --- Optional: Attach raw markdown as separate text file ---
+    // --- Optional: Attach raw markdown as separate text file and save it to disk ---
     try {
       const rawAiContent = aiAnalysisResult?.errorMarkdown ?? aiAnalysisResult?.analysisMarkdown ?? "No AI content.";
+      const markdownContent = `# AI Debugging Analysis\n\n${rawAiContent}\n\n---\n\n# Usage\n\n${aiAnalysisResult?.usageInfoMarkdown ?? "N/A"}`;
+      
+      // 1. Attach to Playwright report
       await testInfo.attach('ai-suggestions-raw.md', {
-        body: `# AI Debugging Analysis\n\n${rawAiContent}\n\n---\n\n# Usage\n\n${aiAnalysisResult?.usageInfoMarkdown ?? "N/A"}`,
+        body: markdownContent,
         contentType: 'text/markdown',
       });
-      console.log(`✅ Successfully attached 'ai-suggestions-raw.md'.`);
+      console.log(`✅ Successfully attached 'ai-suggestions-raw.md' to test results.`);
+      
+      // 2. Save to test output directory
+      const testOutputDir = testInfo.outputDir;
+      const testTitle = testInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      const outputPath = path.join(testOutputDir, `ai-debug-${testTitle}.md`);
+      
+      fs.writeFileSync(outputPath, markdownContent, 'utf8');
+      console.log(`✅ Saved Markdown content to disk at: ${outputPath}`);
     } catch (attachError: unknown) {
       const errorMessage = attachError instanceof Error ? attachError.message : String(attachError);
-      console.warn(`⚠️ Could not attach AI suggestions as markdown file: ${errorMessage}`);
+      console.warn(`⚠️ Could not attach or save AI suggestions: ${errorMessage}`);
     }
 
     console.log('\n--- AI Debugging Complete ---');

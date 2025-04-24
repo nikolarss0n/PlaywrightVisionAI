@@ -14,6 +14,7 @@ import {
 } from './aiDebugger'; // Assuming './aiDebugger.ts'
 import { extractSelectorFromError } from './errorUtils'; // Assuming './errorUtils.ts'
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 // Define the shape of the AI analysis input (remains the same)
 interface AiAnalysisInput {
@@ -92,58 +93,185 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
 
   // Define an afterEach hook
   async page({ page }, use, testInfo: TestInfo) {
-    // Store captured network requests
+    // Store captured network requests with enhanced details
     const networkRequests: Array<{
+      id: string;
       url: string;
       method: string;
       status?: number;
       timestamp: string;
+      resourceType: string;
       requestHeaders?: Record<string, string>;
       responseHeaders?: Record<string, string>;
+      postData?: string;
+      responseBody?: string;
+      responseBodySize?: number;
+      timing?: {
+        startTime: number;
+        endTime?: number;
+        duration?: number;
+      };
+      failed?: boolean;
+      errorText?: string;
     }> = [];
     
     // Store request-response pairs for correlation
     const requestMap = new Map<string, {
+      id: string;
       url: string;
       method: string;
       timestamp: string;
+      resourceType: string;
       requestHeaders: Record<string, string>;
+      postData?: string;
+      timing: {
+        startTime: number;
+      };
     }>();
     
     // Generate a unique ID counter
     let requestCounter = 0;
     
+    // Add _requestsData property to page for direct access from AI debugging
+    // @ts-expect-error - Adding a property to the page object for internal use
+    page._requestsData = networkRequests;
+    
     // Listen for network requests
     page.on('request', request => {
-      const uniqueId = `req_${++requestCounter}`;
+      const id = `req_${++requestCounter}`;
       const timestamp = new Date().toISOString();
+      const startTime = Date.now();
       
-      // Only track important network requests (not images, fonts, etc.)
-      if (
-        request.resourceType() === 'xhr' ||
-        request.resourceType() === 'fetch' ||
-        request.resourceType() === 'document'
-      ) {
+      // Include post data for POST/PUT requests when available and not a binary
+      let postData: string | undefined;
+      try {
+        if ((request.method() === 'POST' || request.method() === 'PUT') &&
+            request.postData() &&
+            !request.postData()?.includes('\u0000')) {
+          postData = request.postData();
+          // Truncate very large payloads
+          if (postData && postData.length > 4000) {
+            postData = postData.substring(0, 4000) + '... [truncated]';
+          }
+        }
+      } catch (e) {
+        // Ignore errors from trying to get post data
+      }
+      
+      // Track important network requests (not images, fonts, etc. by default)
+      // but track everything for API endpoints
+      const resourceType = request.resourceType();
+      const isApiOrImportant =
+        resourceType === 'xhr' ||
+        resourceType === 'fetch' ||
+        resourceType === 'document' ||
+        request.url().includes('/api/') ||
+        request.url().includes('.json');
+      
+      if (isApiOrImportant) {
         requestMap.set(request.url(), {
+          id,
           url: request.url(),
           method: request.method(),
           timestamp,
-          requestHeaders: request.headers()
+          resourceType,
+          requestHeaders: request.headers(),
+          postData,
+          timing: {
+            startTime
+          }
         });
       }
     });
     
+    // Listen for failed requests
+    page.on('requestfailed', request => {
+      const url = request.url();
+      const requestData = requestMap.get(url);
+      
+      if (requestData) {
+        const endTime = Date.now();
+        const requestInfo = {
+          ...requestData,
+          timing: {
+            ...requestData.timing,
+            endTime,
+            duration: endTime - requestData.timing.startTime
+          },
+          failed: true,
+          errorText: request.failure()?.errorText || 'Unknown error'
+        };
+        
+        networkRequests.push(requestInfo);
+        
+        // Remove from map
+        requestMap.delete(url);
+      }
+    });
+    
     // Listen for responses
-    page.on('response', response => {
+    page.on('response', async response => {
       const url = response.url();
       const requestData = requestMap.get(url);
       
       if (requestData) {
-        networkRequests.push({
+        const endTime = Date.now();
+        const status = response.status();
+        
+        // Try to get response body for API calls and responses with error status
+        let responseBody: string | undefined;
+        let responseBodySize: number | undefined;
+        
+        // Only attempt to get body for API responses and errors
+        const isApiOrError =
+          requestData.url.includes('/api/') ||
+          (status >= 400) ||
+          requestData.url.includes('.json');
+        
+        if (isApiOrError) {
+          try {
+            // Use buffer to handle binary data safely
+            const buffer = await response.body().catch(() => null);
+            if (buffer) {
+              // Store size regardless
+              responseBodySize = buffer.length;
+              
+              // Try to decode as text if it looks like text
+              const contentType = response.headers()['content-type'] || '';
+              if (contentType.includes('json') ||
+                  contentType.includes('text') ||
+                  contentType.includes('xml') ||
+                  contentType.includes('html')) {
+                // Use text decoder
+                responseBody = new TextDecoder().decode(buffer);
+                // Truncate very large responses
+                if (responseBody && responseBody.length > 4000) {
+                  responseBody = responseBody.substring(0, 4000) + '... [truncated]';
+                }
+              } else {
+                responseBody = `[Binary data, size: ${buffer.length} bytes]`;
+              }
+            }
+          } catch (e) {
+            // Ignore errors from trying to get response body
+            responseBody = `[Error getting response body: ${e instanceof Error ? e.message : String(e)}]`;
+          }
+        }
+        
+        const requestInfo = {
           ...requestData,
-          status: response.status(),
-          responseHeaders: response.headers()
-        });
+          status,
+          responseHeaders: response.headers(),
+          responseBody,
+          responseBodySize,
+          timing: {
+            ...requestData.timing,
+            endTime,
+            duration: endTime - requestData.timing.startTime
+          }
+        };
+        
+        networkRequests.push(requestInfo);
         
         // Remove from map to avoid duplicate entries
         requestMap.delete(url);
@@ -154,6 +282,84 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
     await use(page);
 
     // --- This code runs AFTER the test body has finished ---
+    
+    // Always attach network requests data to the test artifacts, regardless of test status
+    try {
+      if (networkRequests.length > 0) {
+        // Format relevant requests for the attachment
+        const apiRequests = networkRequests.filter(req =>
+          req.url.includes('/api/') ||
+          req.url.includes('.json') ||
+          req.failed ||
+          (req.status && req.status >= 400)
+        );
+        
+        const otherRequests = networkRequests.filter(req =>
+          !apiRequests.includes(req) &&
+          (req.resourceType === 'xhr' || req.resourceType === 'fetch' || req.resourceType === 'document')
+        );
+        
+        // Combine with API requests first, then others
+        const sortedRequests = [...apiRequests, ...otherRequests];
+        const relevantRequests = sortedRequests.slice(-25); // Reasonable limit
+        
+        // Format for attachment
+        const formattedRequests = relevantRequests.map(req => {
+          // Basic info
+          const formatted: any = {
+            url: req.url,
+            method: req.method,
+            resourceType: req.resourceType,
+            status: req.status || 'No status',
+            timestamp: req.timestamp,
+            timing: req.timing ? `${req.timing.duration}ms` : 'N/A'
+          };
+          
+          // Error details
+          if (req.failed) {
+            formatted.error = req.errorText;
+            formatted.failed = true;
+          }
+          
+          // Include key headers
+          formatted.requestHeaders = req.requestHeaders ?
+            Object.fromEntries(
+              Object.entries(req.requestHeaders)
+                .filter(([key]) => ['content-type', 'authorization', 'accept'].includes(key.toLowerCase()))
+            ) : {};
+            
+          formatted.responseHeaders = req.responseHeaders ?
+            Object.fromEntries(
+              Object.entries(req.responseHeaders)
+                .filter(([key]) => ['content-type'].includes(key.toLowerCase()))
+            ) : {};
+          
+          // Include bodies
+          if (req.postData) {
+            formatted.requestBody = req.postData;
+          }
+          
+          if (req.responseBody && (req.failed || (req.status && req.status >= 400))) {
+            formatted.responseBody = req.responseBody;
+          }
+          else if (req.responseBody && (req.url.includes('/api/') || req.url.includes('.json'))) {
+            formatted.responseBody = req.responseBody;
+          }
+          
+          return formatted;
+        });
+        
+        // Attach the network requests data
+        await testInfo.attach('network-requests.json', {
+          body: JSON.stringify(formattedRequests, null, 2),
+          contentType: 'application/json'
+        });
+        console.log(`✅ Attached ${formattedRequests.length} network requests to test results`);
+      }
+    } catch (error) {
+      console.warn(`⚠️ Failed to attach network requests: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
     if (testInfo.status === 'failed' || testInfo.status === 'timedOut') {
       // Check if there's an error object and the page is still open
       if (testInfo.error && !page.isClosed()) {
@@ -222,30 +428,184 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
 
           // --- Prepare Network Requests Data ---
           let networkRequestsData = "No network requests captured.";
-          if (networkRequests.length > 0) {
-            // Limit to last 20 requests if there are too many
-            const relevantRequests = networkRequests.slice(-20);
-            
-            // Format nicely for AI analysis
-            const formattedRequests = relevantRequests.map(req => ({
-              url: req.url,
-              method: req.method,
-              status: req.status || 'No status',
-              timestamp: req.timestamp,
-              requestHeaders: req.requestHeaders ?
-                Object.fromEntries(
-                  Object.entries(req.requestHeaders)
-                    .filter(([key]) => ['content-type', 'authorization', 'accept'].includes(key.toLowerCase()))
-                ) : {},
-              responseHeaders: req.responseHeaders ?
-                Object.fromEntries(
-                  Object.entries(req.responseHeaders)
-                    .filter(([key]) => ['content-type'].includes(key.toLowerCase()))
-                ) : {}
-            }));
-            
-            networkRequestsData = JSON.stringify(formattedRequests, null, 2);
-            console.log(`✅ Captured ${formattedRequests.length} network requests from test execution.`);
+          
+          // Access the network requests data through the page object
+          // @ts-expect-error - Accessing private property for debugging
+          const pageRequestsData = page._requestsData;
+          
+          // Use the network requests data directly from the page object, which is kept up-to-date
+          if (pageRequestsData && Array.isArray(pageRequestsData) && pageRequestsData.length > 0) {
+            try {
+              // Find API requests, failed requests, and error status responses first
+              const apiRequests = pageRequestsData.filter(req => 
+                req && typeof req === 'object' && (
+                  (req.url && (
+                    req.url.includes('/api/') ||
+                    req.url.includes('.json')
+                  )) ||
+                  req.failed === true ||
+                  (req.status && req.status >= 400)
+                )
+              );
+              
+              // Then include other XHR/fetch/document requests
+              const otherRequests = pageRequestsData.filter(req =>
+                req && typeof req === 'object' && 
+                !apiRequests.includes(req) &&
+                req.resourceType && ['xhr', 'fetch', 'document'].includes(req.resourceType)
+              );
+              
+              // Combine with API requests first, then others, limited to reasonable total
+              const sortedRequests = [...apiRequests, ...otherRequests];
+              const relevantRequests = sortedRequests.slice(-25); // Increase limit slightly
+              
+              // Format nicely for AI analysis, with more emphasis on errors and API requests
+              const formattedRequests = relevantRequests.map(req => {
+                // Basic request info
+                const formatted: any = {
+                  url: req.url || 'unknown',
+                  method: req.method || 'unknown',
+                  resourceType: req.resourceType || 'unknown',
+                  status: req.status || 'No status',
+                  timestamp: req.timestamp || new Date().toISOString(),
+                  timing: req.timing && req.timing.duration ? `${req.timing.duration}ms` : 'N/A'
+                };
+                
+                // Add error details if request failed
+                if (req.failed) {
+                  formatted.error = req.errorText || 'Unknown error';
+                  formatted.failed = true;
+                }
+                
+                // Include headers
+                formatted.requestHeaders = req.requestHeaders ?
+                  Object.fromEntries(
+                    Object.entries(req.requestHeaders)
+                      .filter(([key]) => key && ['content-type', 'authorization', 'accept'].includes(key.toLowerCase()))
+                  ) : {};
+                  
+                formatted.responseHeaders = req.responseHeaders ?
+                  Object.fromEntries(
+                    Object.entries(req.responseHeaders)
+                      .filter(([key]) => key && ['content-type'].includes(key.toLowerCase()))
+                  ) : {};
+                
+                // Include request/response bodies for debugging
+                if (req.postData) {
+                  formatted.requestBody = req.postData;
+                }
+                
+                // Always include response body for failed requests or error status
+                if (req.responseBody && (req.failed || (req.status && req.status >= 400))) {
+                  formatted.responseBody = req.responseBody;
+                }
+                // For successful API requests, include response body if it's relevant
+                else if (req.responseBody && (req.url && (req.url.includes('/api/') || req.url.includes('.json')))) {
+                  formatted.responseBody = req.responseBody;
+                }
+                
+                return formatted;
+              });
+              
+              networkRequestsData = JSON.stringify(formattedRequests, null, 2);
+              console.log(`✅ Using ${formattedRequests.length} network requests from live page data.`);
+            } catch (err) {
+              console.warn(`⚠️ Error processing page network data: ${err instanceof Error ? err.message : String(err)}`);
+              // Fall through to next method
+            }
+          } 
+          // Fallback to using accumulated networkRequests array
+          else if (networkRequests.length > 0) {
+            try {
+              // Find API requests, failed requests, and error status responses first
+              const apiRequests = networkRequests.filter(req =>
+                req && typeof req === 'object' && (
+                  (req.url && (
+                    req.url.includes('/api/') ||
+                    req.url.includes('.json')
+                  )) ||
+                  req.failed === true ||
+                  (req.status && req.status >= 400)
+                )
+              );
+              
+              // Then include other XHR/fetch/document requests
+              const otherRequests = networkRequests.filter(req =>
+                req && typeof req === 'object' && 
+                !apiRequests.includes(req) &&
+                req.resourceType && ['xhr', 'fetch', 'document'].includes(req.resourceType)
+              );
+              
+              // Combine with API requests first, then others, limited to reasonable total
+              const sortedRequests = [...apiRequests, ...otherRequests];
+              const relevantRequests = sortedRequests.slice(-25); // Increase limit slightly
+              
+              // Format nicely for AI analysis, with more emphasis on errors and API requests
+              const formattedRequests = relevantRequests.map(req => {
+                // Basic request info
+                const formatted: any = {
+                  url: req.url || 'unknown',
+                  method: req.method || 'unknown',
+                  resourceType: req.resourceType || 'unknown',
+                  status: req.status || 'No status',
+                  timestamp: req.timestamp || new Date().toISOString(),
+                  timing: req.timing && req.timing.duration ? `${req.timing.duration}ms` : 'N/A'
+                };
+                
+                // Add error details if request failed
+                if (req.failed) {
+                  formatted.error = req.errorText || 'Unknown error';
+                  formatted.failed = true;
+                }
+                
+                // Include headers
+                formatted.requestHeaders = req.requestHeaders ?
+                  Object.fromEntries(
+                    Object.entries(req.requestHeaders)
+                      .filter(([key]) => key && ['content-type', 'authorization', 'accept'].includes(key.toLowerCase()))
+                  ) : {};
+                  
+                formatted.responseHeaders = req.responseHeaders ?
+                  Object.fromEntries(
+                    Object.entries(req.responseHeaders)
+                      .filter(([key]) => key && ['content-type'].includes(key.toLowerCase()))
+                  ) : {};
+                
+                // Include request/response bodies for debugging
+                if (req.postData) {
+                  formatted.requestBody = req.postData;
+                }
+                
+                // Always include response body for failed requests or error status
+                if (req.responseBody && (req.failed || (req.status && req.status >= 400))) {
+                  formatted.responseBody = req.responseBody;
+                }
+                // For successful API requests, include response body if it's relevant
+                else if (req.responseBody && (req.url && (req.url.includes('/api/') || req.url.includes('.json')))) {
+                  formatted.responseBody = req.responseBody;
+                }
+                
+                return formatted;
+              });
+              
+              networkRequestsData = JSON.stringify(formattedRequests, null, 2);
+              console.log(`✅ Captured ${formattedRequests.length} network requests from test execution.`);
+            } catch (err) {
+              console.warn(`⚠️ Error processing network requests: ${err instanceof Error ? err.message : String(err)}`);
+              // Use a simplified version of the requests
+              try {
+                const simpleRequests = networkRequests.map(req => ({
+                  url: String(req.url || 'unknown'),
+                  method: String(req.method || 'unknown'),
+                  status: req.status || 0
+                })).slice(-25);
+                
+                networkRequestsData = JSON.stringify(simpleRequests, null, 2);
+                console.log(`✅ Created simplified version of ${simpleRequests.length} network requests.`);
+              } catch (simpleErr) {
+                console.warn(`⚠️ Unable to format network requests: ${simpleErr instanceof Error ? simpleErr.message : String(simpleErr)}`);
+              }
+            }
           } else {
             // Try to get network requests from trace
             try {
@@ -499,34 +859,139 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
         <div class="glass-effect rounded-2xl max-w-3xl w-full">
            <h3 class="text-lg md:text-xl font-semibold text-gray-50 mb-3">Network Requests</h3>
            <p class="text-sm md:text-base leading-relaxed text-gray-200 mb-3">
-               The following network requests were captured during test execution.
+               ${networkRequests.filter(req => req.failed || (req.status && req.status >= 400)).length > 0 ?
+                 '<span class="text-red-300 font-medium">⚠️ Some request errors detected!</span> ' : ''}
+               Captured ${networkRequests.length} network requests during test execution.
            </p>
+           
+           <div class="flex mb-2 space-x-2">
+               <button id="btn-all-requests" class="px-2 py-1 text-xs bg-gray-700 rounded text-white">All (${networkRequests.length})</button>
+               <button id="btn-api-requests" class="px-2 py-1 text-xs bg-blue-900 rounded text-white">API (${networkRequests.filter(req => req.url.includes('/api/') || req.url.includes('.json')).length})</button>
+               <button id="btn-failed-requests" class="px-2 py-1 text-xs bg-red-900 rounded text-white">Failed (${networkRequests.filter(req => req.failed || (req.status && req.status >= 400)).length})</button>
+           </div>
+           
            <div class="overflow-x-auto">
-               <table class="w-full text-sm text-left text-gray-200">
+               <table id="network-requests-table" class="w-full text-sm text-left text-gray-200">
                    <thead class="text-xs uppercase bg-gray-800 bg-opacity-50 text-gray-300">
                        <tr>
                            <th class="px-4 py-2">Method</th>
                            <th class="px-4 py-2">URL</th>
                            <th class="px-4 py-2">Status</th>
-                           <th class="px-4 py-2">Content-Type</th>
+                           <th class="px-4 py-2">Type</th>
+                           <th class="px-4 py-2">Duration</th>
+                           <th class="px-4 py-2">Details</th>
                        </tr>
                    </thead>
                    <tbody>
                        ${networkRequests.map(req => `
-                       <tr class="bg-gray-800 bg-opacity-20 border-b border-gray-700">
+                       <tr class="bg-gray-800 bg-opacity-20 border-b border-gray-700 ${req.failed || (req.status && req.status >= 400) ? 'bg-red-900 bg-opacity-20' : ''}"
+                           data-type="${req.url.includes('/api/') || req.url.includes('.json') ? 'api' : 'other'}"
+                           data-failed="${req.failed || (req.status && req.status >= 400) ? 'true' : 'false'}">
                            <td class="px-4 py-2 font-medium ${req.method === 'GET' ? 'text-blue-300' : req.method === 'POST' ? 'text-green-300' : req.method === 'PUT' ? 'text-yellow-300' : req.method === 'DELETE' ? 'text-red-300' : 'text-gray-300'}">${escapeHtml(req.method)}</td>
                            <td class="px-4 py-2 font-mono text-xs overflow-hidden overflow-ellipsis" style="max-width: 200px;">${escapeHtml(req.url)}</td>
-                           <td class="px-4 py-2 ${(req.status && req.status >= 200 && req.status < 300) ? 'text-green-300' : (req.status && req.status >= 400) ? 'text-red-300' : 'text-gray-300'}">${req.status || 'N/A'}</td>
-                           <td class="px-4 py-2 font-mono text-xs">${escapeHtml(req.responseHeaders?.['content-type'] || 'N/A')}</td>
+                           <td class="px-4 py-2 ${(req.status && req.status >= 200 && req.status < 300) ? 'text-green-300' : (req.status && req.status >= 400) ? 'text-red-300' : req.failed ? 'text-red-300' : 'text-gray-300'}">
+                               ${req.failed ? '❌ Failed' : (req.status || 'N/A')}
+                               ${req.failed ? `<div class="text-xs text-red-200">${escapeHtml(req.errorText || '')}</div>` : ''}
+                           </td>
+                           <td class="px-4 py-2 font-mono text-xs">${escapeHtml(req.resourceType || 'N/A')}</td>
+                           <td class="px-4 py-2 text-xs">${req.timing && req.timing.duration ? `${req.timing.duration}ms` : 'N/A'}</td>
+                           <td class="px-4 py-2">
+                               <button class="px-2 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600 text-white view-details" data-id="${req.id}">Details</button>
+                           </td>
                        </tr>
                        `).join('')}
                    </tbody>
                </table>
            </div>
-           <details class="mt-4">
-               <summary class="cursor-pointer text-gray-300 hover:text-white">View Raw Network Data</summary>
-               <pre class="mt-2 bg-gray-800 bg-opacity-50 p-3 rounded text-xs overflow-x-auto">${escapeHtml(JSON.stringify(networkRequests, null, 2))}</pre>
-           </details>
+           
+           ${networkRequests.map(req => `
+           <div id="details-${req.id}" class="hidden request-details mt-4 p-4 bg-gray-800 bg-opacity-30 rounded">
+               <div class="flex justify-between mb-2">
+                   <h4 class="font-medium text-md">${escapeHtml(req.method)} ${escapeHtml(req.url)}</h4>
+                   <button class="close-details px-2 text-sm bg-gray-700 rounded">×</button>
+               </div>
+               
+               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                   <div>
+                       <h5 class="text-sm font-medium mb-1 text-blue-300">Request</h5>
+                       <div class="text-xs mb-2">
+                           <strong>Headers:</strong>
+                           <pre class="mt-1 bg-gray-900 p-2 rounded overflow-x-auto">${escapeHtml(JSON.stringify(req.requestHeaders || {}, null, 2))}</pre>
+                       </div>
+                       ${req.postData ? `
+                       <div class="text-xs">
+                           <strong>Body:</strong>
+                           <pre class="mt-1 bg-gray-900 p-2 rounded overflow-x-auto">${escapeHtml(req.postData)}</pre>
+                       </div>
+                       ` : ''}
+                   </div>
+                   
+                   <div>
+                       <h5 class="text-sm font-medium mb-1 ${req.failed || (req.status && req.status >= 400) ? 'text-red-300' : 'text-green-300'}">
+                           Response ${req.failed ? '(Failed)' : req.status || ''}
+                       </h5>
+                       ${req.failed ? `
+                       <div class="text-xs mb-2 text-red-300">
+                           <strong>Error:</strong> ${escapeHtml(req.errorText || 'Unknown error')}
+                       </div>
+                       ` : ''}
+                       <div class="text-xs mb-2">
+                           <strong>Headers:</strong>
+                           <pre class="mt-1 bg-gray-900 p-2 rounded overflow-x-auto">${escapeHtml(JSON.stringify(req.responseHeaders || {}, null, 2))}</pre>
+                       </div>
+                       ${req.responseBody ? `
+                       <div class="text-xs">
+                           <strong>Body:</strong>
+                           <pre class="mt-1 bg-gray-900 p-2 rounded overflow-x-auto">${escapeHtml(req.responseBody)}</pre>
+                       </div>
+                       ` : ''}
+                   </div>
+               </div>
+           </div>
+           `).join('')}
+           
+           <script>
+               // Add interactive filtering and detail view
+               document.addEventListener('DOMContentLoaded', () => {
+                   // Filtering
+                   document.getElementById('btn-all-requests').addEventListener('click', () => {
+                       document.querySelectorAll('#network-requests-table tbody tr').forEach(row => {
+                           row.style.display = '';
+                       });
+                   });
+                   
+                   document.getElementById('btn-api-requests').addEventListener('click', () => {
+                       document.querySelectorAll('#network-requests-table tbody tr').forEach(row => {
+                           row.style.display = row.getAttribute('data-type') === 'api' ? '' : 'none';
+                       });
+                   });
+                   
+                   document.getElementById('btn-failed-requests').addEventListener('click', () => {
+                       document.querySelectorAll('#network-requests-table tbody tr').forEach(row => {
+                           row.style.display = row.getAttribute('data-failed') === 'true' ? '' : 'none';
+                       });
+                   });
+                   
+                   // Detail view
+                   document.querySelectorAll('.view-details').forEach(button => {
+                       button.addEventListener('click', () => {
+                           const id = button.getAttribute('data-id');
+                           // Hide all other details
+                           document.querySelectorAll('.request-details').forEach(detail => {
+                               detail.classList.add('hidden');
+                           });
+                           // Show this one
+                           document.getElementById(\`details-\${id}\`).classList.remove('hidden');
+                       });
+                   });
+                   
+                   document.querySelectorAll('.close-details').forEach(button => {
+                       button.addEventListener('click', () => {
+                           button.closest('.request-details').classList.add('hidden');
+                       });
+                   });
+               });
+           </script>
         </div>
         ` : ''}
 
@@ -551,16 +1016,50 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
 </html>
 `; // --- End HTML Generation ---
 
-          // --- Attach the FINAL HTML Report ---
+          // --- Attach the FINAL HTML Report to Playwright report and save it to disk ---
           try {
+            // 1. Attach to Playwright HTML report as before
             await testInfo.attach('ai-debug-analysis.html', {
               body: glassmorphismHtml,
               contentType: 'text/html',
             });
-            console.log(`✅ Successfully attached 'ai-debug-analysis.html' report.`);
+            console.log(`✅ Successfully attached 'ai-debug-analysis.html' report to test results.`);
+            
+            // 2. Create an additional copy in the test outputs directory
+            const testOutputDir = testInfo.outputDir;
+            const testTitle = testInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const outputPath = path.join(testOutputDir, `ai-debug-${testTitle}.html`);
+            
+            fs.writeFileSync(outputPath, glassmorphismHtml, 'utf8');
+            console.log(`✅ Saved HTML report to disk at: ${outputPath}`);
+            
+            // 3. Save another copy in a top-level debug directory (if one exists)
+            const projectRoot = process.cwd();
+            const debugDirPath = path.join(projectRoot, 'test-debug');
+            
+            // Create the directory if it doesn't exist
+            if (!fs.existsSync(debugDirPath)) {
+              try {
+                fs.mkdirSync(debugDirPath, { recursive: true });
+              } catch (mkdirError) {
+                console.warn(`⚠️ Could not create debug directory: ${String(mkdirError)}`);
+              }
+            }
+            
+            if (fs.existsSync(debugDirPath)) {
+              const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+              const debugPath = path.join(debugDirPath, `ai-debug-${testTitle}-${timestamp}.html`);
+              
+              try {
+                fs.writeFileSync(debugPath, glassmorphismHtml, 'utf8');
+                console.log(`✅ Saved HTML report to debug directory: ${debugPath}`);
+              } catch (writeError) {
+                console.warn(`⚠️ Could not write to debug directory: ${String(writeError)}`);
+              }
+            }
           } catch (attachError: unknown) {
             const errorMessage = attachError instanceof Error ? attachError.message : String(attachError);
-            console.error(`\n❌ Error attaching HTML report: ${errorMessage}`, attachError);
+            console.error(`\n❌ Error attaching or saving HTML report: ${errorMessage}`, attachError);
           }
 
           // --- Log AI analysis completion to console, but don't modify error stack ---
@@ -568,17 +1067,28 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
           console.log("AI analysis results attached to test report.");
           console.log("View HTML report and markdown attachment for details.");
 
-          // --- Optional: Attach raw markdown as separate text file ---
+          // --- Optional: Attach raw markdown as separate text file and save it to disk ---
           try {
             const rawAiContent = aiAnalysisResult?.errorMarkdown ?? aiAnalysisResult?.analysisMarkdown ?? "No AI content.";
+            const markdownContent = `# AI Debugging Analysis\n\n${rawAiContent}\n\n---\n\n# Usage\n\n${aiAnalysisResult?.usageInfoMarkdown ?? "N/A"}`;
+            
+            // 1. Attach to Playwright report
             await testInfo.attach('ai-suggestions-raw.md', {
-              body: `# AI Debugging Analysis\n\n${rawAiContent}\n\n---\n\n# Usage\n\n${aiAnalysisResult?.usageInfoMarkdown ?? "N/A"}`,
+              body: markdownContent,
               contentType: 'text/markdown',
             });
-            console.log(`✅ Successfully attached 'ai-suggestions-raw.md'.`);
+            console.log(`✅ Successfully attached 'ai-suggestions-raw.md' to test results.`);
+            
+            // 2. Save to test output directory
+            const testOutputDir = testInfo.outputDir;
+            const testTitle = testInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const outputPath = path.join(testOutputDir, `ai-debug-${testTitle}.md`);
+            
+            fs.writeFileSync(outputPath, markdownContent, 'utf8');
+            console.log(`✅ Saved Markdown content to disk at: ${outputPath}`);
           } catch (attachError: unknown) {
             const errorMessage = attachError instanceof Error ? attachError.message : String(attachError);
-            console.warn(`⚠️ Could not attach AI suggestions as markdown file: ${errorMessage}`);
+            console.warn(`⚠️ Could not attach or save AI suggestions: ${errorMessage}`);
           }
 
         } catch (captureError: unknown) {
