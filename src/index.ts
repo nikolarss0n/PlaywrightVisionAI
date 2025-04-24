@@ -562,9 +562,38 @@ export async function runAiDebuggingAnalysis(page: Page, testInfo: TestInfo, err
       console.warn(`⚠️ Could not attach or save AI suggestions: ${errorMessage}`);
     }
 
+    // Create a more helpful summary of report locations
     console.log('\n--- AI Debugging Complete ---');
-    console.log('AI analysis results attached to test report.');
-    console.log('View HTML report and markdown attachment for details.');
+    
+    // Show main locations where reports can be found
+    console.log('📊 AI Analysis Reports Available At:');
+    
+    // 1. Playwright HTML Report
+    console.log('  • 🔍 Playwright Report: Open with "npx playwright show-report"');
+    
+    // 2. Test Output Directory
+    const testOutputDir = testInfo.outputDir;
+    const testTitle = testInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    console.log(`  • 📁 Test Output: ${path.join(testOutputDir, `ai-debug-${testTitle}.html`)}`);
+    
+    // 3. Debug Directory (global)
+    const projectRoot = process.cwd();
+    const debugDirPath = path.join(projectRoot, 'test-debug');
+    if (fs.existsSync(debugDirPath)) {
+      console.log(`  • 📂 Debug Directory: ${debugDirPath}/ai-debug-*-*.html`);
+    }
+    
+    // 4. Markdown report
+    console.log(`  • 📝 Markdown: ${path.join(testOutputDir, `ai-debug-${testTitle}.md`)}`);
+    
+    // Add reminder about test times if it took a while
+    if (aiAnalysisResult && aiAnalysisResult.analysisMarkdown) {
+      const endTimestamp = Date.now();
+      const totalDuration = endTimestamp - startTime;
+      if (totalDuration > 5000) {
+        console.log(`\n⏱️  Total AI debugging time: ${(totalDuration / 1000).toFixed(1)}s`);
+      }
+    }
 
   } catch (captureError: unknown) {
     const errorMessage = captureError instanceof Error ? captureError.message : String(captureError);

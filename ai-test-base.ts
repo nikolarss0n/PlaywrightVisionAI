@@ -1062,10 +1062,36 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
             console.error(`\n❌ Error attaching or saving HTML report: ${errorMessage}`, attachError);
           }
 
-          // --- Log AI analysis completion to console, but don't modify error stack ---
+          // --- Log AI analysis completion to console with detailed information ---
           console.log(`\n${SEPARATOR}\n${createCenteredHeader("💡 AI Debugging Complete 💡")}\n${SEPARATOR}`);
-          console.log("AI analysis results attached to test report.");
-          console.log("View HTML report and markdown attachment for details.");
+          
+          // Show main locations where reports can be found
+          console.log('📊 AI Analysis Reports Available At:');
+          
+          // 1. Playwright HTML Report
+          console.log('  • 🔍 Playwright Report: Open with "npx playwright show-report"');
+          
+          // 2. Test Output Directory
+          const testOutputDir = testInfo.outputDir;
+          const testTitle = testInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+          console.log(`  • 📁 Test Output: ${path.join(testOutputDir, `ai-debug-${testTitle}.html`)}`);
+          
+          // 3. Debug Directory (global)
+          const projectRoot = process.cwd();
+          const debugDirPath = path.join(projectRoot, 'test-debug');
+          if (fs.existsSync(debugDirPath)) {
+            console.log(`  • 📂 Debug Directory: ${debugDirPath}/ai-debug-*-*.html`);
+          }
+          
+          // 4. Markdown report
+          console.log(`  • 📝 Markdown: ${path.join(testOutputDir, `ai-debug-${testTitle}.md`)}`);
+          
+          // Add reminder about test times if it took a while
+          const endTimestamp = Date.now();
+          const totalDuration = endTimestamp - startTime;
+          if (totalDuration > 5000) {
+            console.log(`\n⏱️  Total AI debugging time: ${(totalDuration / 1000).toFixed(1)}s`);
+          }
 
           // --- Optional: Attach raw markdown as separate text file and save it to disk ---
           try {
