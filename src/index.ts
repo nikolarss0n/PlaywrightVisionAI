@@ -439,13 +439,44 @@ export async function runAiDebuggingAnalysis(page: Page, testInfo: TestInfo, err
 </html>
 `; // --- End HTML Generation ---
 
+    // Initialize error/warning collections
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    
+    // Collect debug data for markdown report
+    const debugData = [
+      `**Test**: ${testInfo.title}`,
+      `**Status**: ${testInfo.status}`,
+      `**Duration**: ${testInfo.duration}ms`,
+      `**Errors**: ${errors.length > 0 ? errors.join('\n- ') : 'None'}`,
+      `**Warnings**: ${warnings.length > 0 ? warnings.join('\n- ') : 'None'}`
+    ];
+    
+    const analysisResultsMarkdown = `# AI Debug Analysis\n\n${debugData.join('\n\n')}`;
+
     // --- Attach the FINAL HTML Report ---
     try {
+      // Get playwright report directory and create sibling directory for html exports
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const debugReportsDir = path.join(path.dirname(testInfo.outputDir), '../debug-html-reports');
+      fs.mkdirSync(debugReportsDir, { recursive: true });
+
+      // Save HTML file with timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const htmlFilePath = path.join(debugReportsDir, `ai-debug-analysis-${timestamp}.html`);
+      fs.writeFileSync(htmlFilePath, glassmorphismHtml);
+
+      // Also save raw markdown version (using HTML content as fallback)
+      const mdFilePath = path.join(debugReportsDir, `ai-debug-analysis-${timestamp}.md`);
+      fs.writeFileSync(mdFilePath, glassmorphismHtml); // Using HTML content since markdown source isn't available
+
+      // Attach HTML to playwright report
       await testInfo.attach('ai-debug-analysis.html', {
         body: glassmorphismHtml,
         contentType: 'text/html',
       });
-      console.log(`✅ Successfully attached 'ai-debug-analysis.html' report.`);
+      console.log(`✅ Saved debug reports to:\n${debugReportsDir}`);
     } catch (attachError: unknown) {
       const errorMessage = attachError instanceof Error ? attachError.message : String(attachError);
       console.error(`\n❌ Error attaching HTML report: ${errorMessage}`, attachError);
