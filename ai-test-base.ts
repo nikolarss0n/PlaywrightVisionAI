@@ -160,6 +160,8 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
         let aiAnalysisResult: AiDebuggingResult | null = null; // To store AI result
         let aiAnalysisHtml = '<p>AI Analysis could not be performed.</p>'; // Default HTML content
         let usageInfoHtml = ''; // Default usage HTML
+        // Initialize combinedAnalysis to prevent reference errors
+        let combinedAnalysis = '';
 
         try {
           // --- Context Gathering ---

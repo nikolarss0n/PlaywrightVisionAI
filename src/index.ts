@@ -452,6 +452,9 @@ export async function runAiDebuggingAnalysis(page: Page, testInfo: TestInfo, err
       `**Warnings**: ${warnings.length > 0 ? warnings.join('\n- ') : 'None'}`
     ];
     
+    // Initialize combinedAnalysis to prevent reference errors
+    let combinedAnalysis = '';
+    
     const analysisResultsMarkdown = `# AI Debug Analysis\n\n${debugData.join('\n\n')}`;
 
     // --- Attach the FINAL HTML Report ---
