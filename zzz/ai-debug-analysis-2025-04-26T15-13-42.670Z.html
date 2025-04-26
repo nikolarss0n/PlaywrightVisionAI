@@ -1,137 +1,10 @@
-/**
- * Module for generating HTML reports
- */
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import type { TestInfo } from '@playwright/test';
-import { marked } from 'marked';
-import type { NetworkRequest } from './types';
 
-/**
- * Helper function to escape HTML characters
- */
-export function escapeHtml(unsafe: string | undefined | null): string {
-  if (!unsafe) return '';
-  return unsafe
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-/**
- * Helper function to safely convert an error message to string
- */
-export function safeErrorToString(errorMsg: unknown): string {
-  if (errorMsg === null || errorMsg === undefined) {
-    return 'No error message available';
-  }
-  
-  if (typeof errorMsg === 'string') {
-    return errorMsg;
-  }
-  
-  if (typeof errorMsg === 'object') {
-    try {
-      // Try to stringify the object with proper formatting
-      return JSON.stringify(errorMsg, null, 2);
-    } catch (e) {
-      // If JSON.stringify fails, fall back to simpler approach
-      return Object.prototype.toString.call(errorMsg);
-    }
-  }
-  
-  // For anything else, convert to string
-  return String(errorMsg);
-}
-
-/**
- * Saves the HTML report and attaches it to the test results
- */
-export async function saveAndAttachReport(
-  testInfo: TestInfo,
-  htmlReport: string,
-  analysisMarkdown?: string,
-  usageInfoMarkdown?: string
-): Promise<void> {
-  try {
-    // Create a folder for AI debug reports if it doesn't exist
-    const reportFolder = path.join(process.cwd(), 'zzz');
-    if (!fs.existsSync(reportFolder)) {
-      fs.mkdirSync(reportFolder, { recursive: true });
-    }
-
-    // Generate a timestamp-based filename to avoid overwriting
-    const timestamp = new Date().toISOString().replace(/:/g, '-');
-    const reportFilePath = path.join(reportFolder, `ai-debug-analysis-${timestamp}.html`);
-    
-    // Write the HTML report to a file
-    fs.writeFileSync(reportFilePath, htmlReport);
-    console.log(`✅ HTML report saved to: ${reportFilePath}`);
-    
-    // Attach the report to the test results
-    await testInfo.attach('ai-debug-report.html', {
-      path: reportFilePath,
-      contentType: 'text/html',
-    });
-    
-    // Also save markdown files if provided
-    if (analysisMarkdown) {
-      const markdownPath = path.join(reportFolder, `ai-analysis-${timestamp}.md`);
-      fs.writeFileSync(markdownPath, analysisMarkdown);
-      await testInfo.attach('ai-analysis.md', {
-        path: markdownPath,
-        contentType: 'text/markdown',
-      });
-    }
-    
-    if (usageInfoMarkdown) {
-      const usagePath = path.join(reportFolder, `usage-info-${timestamp}.md`);
-      fs.writeFileSync(usagePath, usageInfoMarkdown);
-      await testInfo.attach('usage-info.md', {
-        path: usagePath,
-        contentType: 'text/markdown',
-      });
-    }
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`❌ Failed to save or attach report: ${errorMessage}`);
-  }
-}
-
-/**
- * Generates the HTML report from the collected data - with terminal-like styling
- */
-export function generateHtmlReport({
-  testInfo,
-  failingSelector,
-  testCode,
-  errorMsg,
-  stackTrace,
-  networkRequests,
-  aiAnalysisHtml,
-  usageInfoHtml
-}: {
-  testInfo: TestInfo;
-  failingSelector?: string | null;
-  testCode?: string;
-  errorMsg: string;
-  stackTrace?: string;
-  networkRequests: NetworkRequest[];
-  aiAnalysisHtml: string;
-  usageInfoHtml: string;
-}): string {
-  const reportTitle = `Playwright Vision AI Debug Report: ${escapeHtml(testInfo.title)}`;
-  
-  // Generate HTML header with styling
-  const htmlHeader = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${reportTitle}</title>
+    <title>Playwright Vision AI Debug Report: should correctly display API data from JSONPlaceholder</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -714,9 +587,7 @@ export function generateHtmlReport({
             }
         }
     </style>
-</head>`;
-  // Body start with blur background and terminal section
-  const bodyStart = `
+</head>
 <body>
     <div class="bg-blur"></div>
     <main>
@@ -730,12 +601,9 @@ export function generateHtmlReport({
                         <button class="tab-button active" data-tab="overview">Test Overview</button>
                         <button class="tab-button" data-tab="error">Error Details <span class="badge badge-error">1</span></button>
                         <button class="tab-button" data-tab="ai">AI Analysis</button>
-                        <button class="tab-button" data-tab="network">Network Requests <span class="badge badge-info">${networkRequests.length}</span></button>
+                        <button class="tab-button" data-tab="network">Network Requests <span class="badge badge-info">1</span></button>
                         <button class="tab-button" data-tab="usage">Usage Info</button>
-                    </div>`;
-
-  // Test Overview Tab
-  const overviewTab = `
+                    </div>
                     <!-- Test Overview Tab -->
                     <div class="tab-content active" id="overview-tab">
                         <div class="card mt-4">
@@ -743,37 +611,68 @@ export function generateHtmlReport({
                                 <h3 class="card-title">Test Information</h3>
                             </div>
                             <div class="card-body">
-                                <p><strong>Test:</strong> ${escapeHtml(testInfo.title)}</p>
-                                <p><strong>File:</strong> ${escapeHtml(path.relative(process.cwd(), testInfo.file))}</p>
-                                <p><strong>Browser:</strong> ${escapeHtml(testInfo.project.name)}</p>
+                                <p><strong>Test:</strong> should correctly display API data from JSONPlaceholder</p>
+                                <p><strong>File:</strong> my-feature.spec.ts</p>
+                                <p><strong>Browser:</strong> chromium</p>
                                 <p><strong>Status:</strong> <span class="text-error">failed</span></p>
-                                <p><strong>Duration:</strong> ${testInfo.duration}ms</p>
+                                <p><strong>Duration:</strong> 5242ms</p>
                             </div>
                         </div>
 
-                        ${failingSelector ? `
-                        <div class="card mt-4">
-                            <div class="card-header">
-                                <h3 class="card-title">Failing Selector</h3>
-                            </div>
-                            <div class="card-body">
-                                <code>${escapeHtml(failingSelector)}</code>
-                            </div>
-                        </div>` : ''}
+                        
 
-                        ${testCode ? `
+                        
                         <div class="card mt-4">
                             <div class="card-header">
                                 <h3 class="card-title">Test Code</h3>
                             </div>
                             <div class="card-body">
-                                <pre><code class="language-javascript">${escapeHtml(testCode)}</code></pre>
-                            </div>
-                        </div>` : ''}
-                    </div>`;
+                                <pre><code class="language-javascript">import { test, expect } from &#039;./ai-test-base&#039;;
 
-  // Error Details Tab
-  const errorTab = `
+// Test that would fail due to network request issues - the AI should be able to identify
+// that the failure is related to API data not matching expectations
+test(&#039;should correctly display API data from JSONPlaceholder&#039;, async ({ page }) =&gt; {
+  // Set up request interception for API calls to JSONPlaceholder
+  await page.route(&#039;**/posts/**&#039;, async route =&gt; {
+    // Modify the response to simulate an API issue
+    const json = {
+      id: 1,
+      title: &quot;Modified API Response&quot;,
+      body: &quot;This is a modified response that will cause the test to fail&quot;,
+      userId: 999 // Modified userId that won&#039;t match expectations
+    };
+    
+    await route.fulfill({
+      status: 200,
+      contentType: &#039;application/json&#039;,
+      body: JSON.stringify(json)
+    });
+    
+    console.log(&#039;Intercepted and modified API response&#039;);
+  });
+
+  // Navigate to JSONPlaceholder demo site
+  await page.goto(&#039;https://jsonplaceholder.typicode.com/posts/1&#039;);
+  
+  // Wait for API data to load
+  await page.waitForSelector(&#039;pre&#039;);
+  
+  // The test should fail here because we&#039;ve modified the API response
+  // and the userId no longer matches what we expect
+  try {
+    await expect(page.getByText(&#039;&quot;userId&quot;: 1&#039;)).toBeVisible({
+      timeout: 5000
+    });
+  } catch (error) {
+    // Throw a custom error message that will be captured by the AI debugger
+    throw new Error(&#039;Expected to find userId: 1 in the response, but it was modified by our API interceptor&#039;);
+  }
+});
+
+</code></pre>
+                            </div>
+                        </div>
+                    </div>
                     <!-- Error Details Tab -->
                     <div class="tab-content" id="error-tab">
                         <div class="card mt-4">
@@ -782,21 +681,19 @@ export function generateHtmlReport({
                             </div>
                             <div class="card-body">
                                 <p><strong class="text-error">Error Message:</strong></p>
-                                <code class="error-block-code">${escapeHtml(safeErrorToString(errorMsg))}</code>
+                                <code class="error-block-code">Error: Expected to find userId: 1 in the response, but it was modified by our API interceptor</code>
                                 
-                                ${stackTrace ? `
+                                
                                 <div class="mt-4">
                                     <details>
                                         <summary>Show Stack Trace</summary>
-                                        <pre><code class="language-javascript">${escapeHtml(stackTrace)}</code></pre>
+                                        <pre><code class="language-javascript">Error: Expected to find userId: 1 in the response, but it was modified by our API interceptor
+    at /Users/nklars0/Projects/PlaywrightVisionAI/my-feature.spec.ts:39:11</code></pre>
                                     </details>
-                                </div>` : ''}
+                                </div>
                             </div>
                         </div>
-                    </div>`;
-
-  // AI Analysis Tab
-  const aiAnalysisTab = `
+                    </div>
                     <!-- AI Analysis Tab -->
                     <div class="tab-content" id="ai-tab">
                         <div class="mb-4">
@@ -809,12 +706,64 @@ export function generateHtmlReport({
                             </div>
                         </div>
                         <div id="aiContentContainer" class="ai-content-area">
-                            ${aiAnalysisHtml}
-                        </div>
-                    </div>`;
+                            <h3>Element Identification</h3>
+<p>The target element is the <code>&lt;pre&gt;</code> element containing the JSON response from the API. It displays the entire JSON object as text within the browser window.  The screenshot shows the modified JSON response, where the <code>userId</code> is 999 instead of the expected 1.</p>
+<hr>
+<h3>Suggested Locators</h3>
+<ol>
+<li><p><strong>User-Facing (Text):</strong> <code>page.getByText(&#39;{\\&quot;id\\&quot;:1,\\&quot;title\\&quot;:\\&quot;Modified API Response\\&quot;,\\&quot;body\\&quot;:\\&quot;This is a modified response that will cause the test to fail\\&quot;,\\&quot;userId\\&quot;:999}&#39;)</code></p>
+<ul>
+<li>Reasoning: This locator targets the entire JSON string.  It&#39;s specific but might be brittle if the entire response changes. Escape characters are necessary for the JSON string.</li>
+</ul>
+</li>
+<li><p><strong>CSS (Tag):</strong> <code>page.locator(&#39;pre&#39;)</code></p>
+<ul>
+<li>Reasoning: This locator targets the <code>&lt;pre&gt;</code> tag. Simple and less brittle than targeting the full text, but might not be unique if multiple <code>&lt;pre&gt;</code> tags exist on the page.</li>
+</ul>
+</li>
+<li><p><strong>Combination:</strong> <code>page.locator(&#39;pre&#39;).filter({ hasText: &#39;&quot;userId&quot;: 999&#39; })</code></p>
+<ul>
+<li>Reasoning: This combines the tag selector with a partial text match, offering a balance between robustness and specificity. It targets the <code>&lt;pre&gt;</code> tag and filters it to the one containing the modified userId.</li>
+</ul>
+</li>
+</ol>
+<hr>
+<h3>Failure Explanation</h3>
+<p>The original selector (<code>N/A</code> in this case, but implied to be <code>page.getByText(&#39;&quot;userId&quot;: 1&#39;)</code>) failed because the API response was intercepted and modified. The <code>userId</code> in the response is 999, not 1 as expected by the test. The network activity (specifically the intercepted request) confirms this modification.  The error message &quot;Expected to find userId: 1 in the response, but it was modified by our API interceptor&quot; explicitly states this.</p>
+<hr>
+<h3>Test Improvement Suggestions</h3>
+<ul>
+<li><strong>Replace <code>page.waitForSelector(&#39;pre&#39;)</code> with a more robust wait:</strong>  Instead of waiting for the <code>&lt;pre&gt;</code> element to appear, wait for the specific API response data. This makes the test less flaky and more directly tied to the data being tested.</li>
+</ul>
+<pre><code class="language-javascript">await expect(page.locator(&#39;pre&#39;)).toContainText(&#39;&quot;userId&quot;: 999&#39;); // Use the modified userId
+</code></pre>
+<ul>
+<li><strong>Improve assertion:</strong>  The original assertion tries to check visibility, but the real failure is the incorrect data.  Assert directly on the content of the <code>&lt;pre&gt;</code> element.</li>
+</ul>
+<pre><code class="language-javascript">const preText = await page.locator(&#39;pre&#39;).textContent();
+const jsonResponse = JSON.parse(preText);
+expect(jsonResponse.userId).toBe(999); // Assert on the parsed JSON data
+</code></pre>
+<ul>
+<li><p><strong>Remove unnecessary <code>try...catch</code> and custom error:</strong> Playwright&#39;s <code>expect</code> will handle the assertion failure and provide a clear error message. The custom error is redundant.</p>
+</li>
+<li><p><strong>Refactor for clarity:</strong> Separate the API interception logic from the assertion logic. This improves readability and maintainability.</p>
+</li>
+</ul>
+<pre><code class="language-javascript">// ... (Interception logic remains the same)
 
-  // Network Requests Tab
-  const networkTabStart = `
+// Assertions
+const preText = await page.locator(&#39;pre&#39;).textContent();
+const jsonResponse = JSON.parse(preText);
+expect(jsonResponse.userId).toBe(999);
+</code></pre>
+<ul>
+<li><strong>Consider mocking the API:</strong> For more controlled testing, consider mocking the API response entirely instead of intercepting and modifying it. This isolates the test from external dependencies and makes it more deterministic.</li>
+</ul>
+<p>By implementing these suggestions, the test will be more reliable, easier to understand, and more focused on verifying the correct behavior.</p>
+
+                        </div>
+                    </div>
                     <!-- Network Requests Tab -->
                     <div class="tab-content" id="network-tab">
                         <div class="card-header">
@@ -847,76 +796,55 @@ export function generateHtmlReport({
                                         <th>Details</th>
                                     </tr>
                                 </thead>
-                                <tbody>`;
-                                
-  // Generate network rows
-  const networkTableRows = networkRequests.length > 0 
-    ? networkRequests.map((req, index) => {
-        const statusClass = (req.status ?? 0) >= 400 ? 'status-error' : ((req.status ?? 0) >= 300 ? 'status-redirect' : 'status-success');
-        const methodClass = req.method?.toLowerCase() === 'get' ? 'method-get' : 
-                          req.method?.toLowerCase() === 'post' ? 'method-post' :
-                          req.method?.toLowerCase() === 'put' ? 'method-put' :
-                          req.method?.toLowerCase() === 'delete' ? 'method-delete' : '';
-        
-        return `
-                                    <tr class="network-row" data-type="${escapeHtml(req.resourceType || '')}" data-url="${escapeHtml(req.url || '')}" data-status="${req.status || 0}">
-                                        <td class="${methodClass}">${escapeHtml(req.method || 'GET')}</td>
-                                        <td class="text-purple">${escapeHtml(req.resourceType || '')}</td>
-                                        <td class="font-mono text-xs" style="max-width: 250px; word-break: break-all;">${escapeHtml(req.url || '')}</td>
-                                        <td class="${statusClass}">${req.status || 0}</td>
-                                        <td class="font-mono text-xs">${escapeHtml(req.responseHeaders?.['content-type'] || '')}</td>
+                                <tbody>
+                                    <tr class="network-row" data-type="document" data-url="https://jsonplaceholder.typicode.com/posts/1" data-status="200">
+                                        <td class="method-get">GET</td>
+                                        <td class="text-purple">document</td>
+                                        <td class="font-mono text-xs" style="max-width: 250px; word-break: break-all;">https://jsonplaceholder.typicode.com/posts/1</td>
+                                        <td class="status-success">200</td>
+                                        <td class="font-mono text-xs">application/json</td>
                                         <td>
-                                            <button class="view-btn" onclick="toggleDetails('request-${index}')">View</button>
+                                            <button class="view-btn" onclick="toggleDetails('request-0')">View</button>
                                         </td>
                                     </tr>
-                                    <tr id="request-${index}" class="hidden">
+                                    <tr id="request-0" class="hidden">
                                         <td colspan="6">
                                             <div class="text-xs">
-                                                ${req.requestPostData ? `
-                                                <div class="mb-4">
-                                                    <strong class="text-link">Request Data:</strong>
-                                                    <pre><code>${escapeHtml(
-                                                        (() => {
-                                                            try {
-                                                                const json = JSON.parse(req.requestPostData);
-                                                                return JSON.stringify(json, null, 2);
-                                                            } catch (e) {
-                                                                return req.requestPostData;
-                                                            }
-                                                        })()
-                                                    )}</code></pre>
-                                                </div>` : ''}
-                                                ${req.responseBody ? `
+                                                
+                                                
                                                 <div class="mb-4">
                                                     <strong class="text-success">Response Body:</strong>
-                                                    <pre><code>${escapeHtml(
-                                                        (() => {
-                                                            try {
-                                                                const json = JSON.parse(req.responseBody);
-                                                                return JSON.stringify(json, null, 2);
-                                                            } catch (e) {
-                                                                return req.responseBody;
-                                                            }
-                                                        })()
-                                                    )}</code></pre>
-                                                </div>` : ''}
-                                                ${req.requestHeaders ? `
+                                                    <pre><code>{
+  &quot;id&quot;: 1,
+  &quot;title&quot;: &quot;Modified API Response&quot;,
+  &quot;body&quot;: &quot;This is a modified response that will cause the test to fail&quot;,
+  &quot;userId&quot;: 999
+}</code></pre>
+                                                </div>
+                                                
                                                 <div>
                                                     <strong class="text-warn">Request Headers:</strong>
-                                                    <pre><code>${escapeHtml(JSON.stringify(req.requestHeaders, null, 2))}</code></pre>
-                                                </div>` : ''}
-                                                ${req.responseHeaders ? `
+                                                    <pre><code>{
+  &quot;accept&quot;: &quot;text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7&quot;,
+  &quot;accept-language&quot;: &quot;en-US&quot;,
+  &quot;upgrade-insecure-requests&quot;: &quot;1&quot;,
+  &quot;user-agent&quot;: &quot;Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/134.0.6998.35 Safari/537.36&quot;,
+  &quot;sec-ch-ua&quot;: &quot;\&quot;Chromium\&quot;;v=\&quot;134\&quot;, \&quot;Not:A-Brand\&quot;;v=\&quot;24\&quot;, \&quot;HeadlessChrome\&quot;;v=\&quot;134\&quot;&quot;,
+  &quot;sec-ch-ua-mobile&quot;: &quot;?0&quot;,
+  &quot;sec-ch-ua-platform&quot;: &quot;\&quot;macOS\&quot;&quot;
+}</code></pre>
+                                                </div>
+                                                
                                                 <div class="mt-4">
                                                     <strong class="text-warn">Response Headers:</strong>
-                                                    <pre><code>${escapeHtml(JSON.stringify(req.responseHeaders, null, 2))}</code></pre>
-                                                </div>` : ''}
+                                                    <pre><code>{
+  &quot;content-length&quot;: &quot;123&quot;,
+  &quot;content-type&quot;: &quot;application/json&quot;
+}</code></pre>
+                                                </div>
                                             </div>
                                         </td>
-                                    </tr>`;
-    }).join('') 
-    : '<tr><td colspan="6">No network requests recorded</td></tr>';
-
-  const networkTabEnd = `
+                                    </tr>
                                 </tbody>
                             </table>
                         </div>
@@ -926,33 +854,14 @@ export function generateHtmlReport({
                                 <summary>Network Stats</summary>
                                 <div class="card mt-2">
                                     <div class="card-body">
-                                        <p><strong>Total Requests:</strong> ${networkRequests.length}</p>
-                                        <p><strong>Request Types:</strong> ${
-                                            Object.entries(networkRequests.reduce((acc, req) => {
-                                                if (req.resourceType) acc[req.resourceType] = (acc[req.resourceType] || 0) + 1;
-                                                return acc;
-                                            }, {} as Record<string, number>)).map(([type, count]) => `${type} (${count})`).join(', ') || 'None'
-                                        }</p>
-                                        <p><strong>Status Codes:</strong> ${
-                                            Object.entries(networkRequests.reduce((acc, req) => {
-                                                if (req.status) {
-                                                    const key = req.status >= 500 ? '5xx' : 
-                                                              req.status >= 400 ? '4xx' :
-                                                              req.status >= 300 ? '3xx' :
-                                                              req.status >= 200 ? '2xx' : '1xx';
-                                                    acc[key] = (acc[key] || 0) + 1;
-                                                }
-                                                return acc;
-                                            }, {} as Record<string, number>)).map(([code, count]) => `${code} (${count})`).join(', ') || 'None'
-                                        }</p>
+                                        <p><strong>Total Requests:</strong> 1</p>
+                                        <p><strong>Request Types:</strong> document (1)</p>
+                                        <p><strong>Status Codes:</strong> 2xx (1)</p>
                                     </div>
                                 </div>
                             </details>
                         </div>
-                    </div>`;
-
-  // Usage Info Tab
-  const usageTab = `
+                    </div>
                     <!-- Usage Info Tab -->
                     <div class="tab-content" id="usage-tab">
                         <div class="card">
@@ -963,20 +872,44 @@ export function generateHtmlReport({
                                 <p><strong>Model:</strong> gemini-1.5-pro-latest</p>
                                 <p><strong>Provider:</strong> Google Generative AI</p>
                                 <div id="usageContentContainer">
-                                    ${usageInfoHtml}
+                                    <table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Model</strong></td>
+<td>gemini-1.5-pro-latest</td>
+</tr>
+<tr>
+<td><strong>Total Tokens</strong></td>
+<td>2,118</td>
+</tr>
+<tr>
+<td><strong>Prompt Tokens</strong></td>
+<td>1,328</td>
+</tr>
+<tr>
+<td><strong>Comp. Tokens</strong></td>
+<td>790</td>
+</tr>
+<tr>
+<td><strong>Est. Cost</strong></td>
+<td>$0.0129 USD</td>
+</tr>
+</tbody></table>
+<p><em>Pricing as of March 2025. Check <a href="https://ai.google.dev/pricing">ai.google.dev/pricing</a> for latest rates.</em></p>
+
                                 </div>
                             </div>
                         </div>
-                    </div>`;
-
-  const bodyEnd = `
+                    </div>
                 </div>
             </div>
         </section>
-    </main>`;
-
-  // JavaScript for functionality
-  const javaScript = `
+    </main>
     <script>
         // Tab switching
         document.addEventListener('DOMContentLoaded', function() {
@@ -1325,9 +1258,4 @@ export function generateHtmlReport({
         });
     </script>
 </body>
-</html>`;
-
-  // Combine all parts
-  return htmlHeader + bodyStart + overviewTab + errorTab + aiAnalysisTab + networkTabStart 
-    + networkTableRows + networkTabEnd + usageTab + bodyEnd + javaScript;
-}
+</html>

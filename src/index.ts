@@ -5,7 +5,12 @@
 import type { Page, TestInfo } from '@playwright/test';
 
 // Import modules
-import { runAiDebuggingAnalysis, setupAiDebugging } from './modules/core';
+import { runAiDebuggingAnalysis, setupAiDebugging, enhanceTestWithAiDebugging } from './modules/core';
+import { 
+  setupNetworkCapture, 
+  setupAutomaticNetworkCapture, 
+  getCapturedNetworkRequests 
+} from './modules/networkCapture';
 import {
   TOP_BORDER,
   SEPARATOR,
@@ -19,7 +24,18 @@ import type { AiDebuggingResult, NetworkRequest } from './modules/types';
 export type { AiDebuggingResult, NetworkRequest };
 
 // Re-export the main functions
-export { runAiDebuggingAnalysis, setupAiDebugging };
+export { 
+  runAiDebuggingAnalysis, 
+  setupAiDebugging,
+  enhanceTestWithAiDebugging  // New elegant one-line integration
+};
+
+// Network capture exports
+export {
+  setupNetworkCapture,
+  setupAutomaticNetworkCapture,
+  getCapturedNetworkRequests
+};
 
 // Console styling exports for backwards compatibility
 export {

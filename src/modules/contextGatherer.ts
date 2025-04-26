@@ -37,15 +37,60 @@ export async function captureScreenshot(page: Page): Promise<string | undefined>
 }
 
 /**
+ * Safely converts any error message to string
+ */
+function safeMessageToString(message: unknown): string {
+  if (message === undefined || message === null) {
+    return 'No error message provided.';
+  }
+  
+  if (typeof message === 'string') {
+    return message;
+  }
+  
+  if (typeof message === 'object') {
+    try {
+      return JSON.stringify(message, null, 2);
+    } catch (e) {
+      return String(message);
+    }
+  }
+  
+  return String(message);
+}
+
+/**
  * Extracts error information
  */
-export function extractErrorInfo(error: Error): {
+export function extractErrorInfo(error: Error | any): {
   errorMsg: string;
   stackTrace?: string;
   failingSelector?: string;
 } {
-  const errorMsg = error.message || 'No error message provided.';
-  const stackTrace = error.stack;
+  let errorMsg = 'No error message provided.';
+  let stackTrace: string | undefined = undefined;
+  
+  // Handle different error types
+  if (error) {
+    // Extract message
+    if (error.message !== undefined) {
+      errorMsg = safeMessageToString(error.message);
+    } else if (typeof error === 'string') {
+      errorMsg = error;
+    } else if (typeof error === 'object') {
+      try {
+        errorMsg = JSON.stringify(error, null, 2);
+      } catch (e) {
+        errorMsg = String(error);
+      }
+    } else {
+      errorMsg = String(error);
+    }
+    
+    // Extract stack trace
+    stackTrace = error.stack ? String(error.stack) : undefined;
+  }
+  
   const failingSelector = extractSelectorFromError(error);
   
   return {

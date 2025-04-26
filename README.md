@@ -91,8 +91,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Option 1: Simple setup - use the built-in setupAiDebugging function
-export const test = baseTest;
-setupAiDebugging(test);
+export const test = setupAiDebugging(baseTest);
 export { expect } from '@playwright/test';
 
 // Option 2: Advanced setup with custom configuration
@@ -122,9 +121,74 @@ export const test = baseTest.extend({
 });
 
 // Set up AI debugging with the configured test
-setupAiDebugging(test);
+export const test = setupAiDebugging(test);
 export { expect } from '@playwright/test';
 */
+```
+
+## Integration with Complex Test Setups
+
+If you have a complex test setup with custom fixtures, page objects, or other extensions, you can use these approaches:
+
+### Method 1: Using the Enhanced setupAiDebugging Function (Recommended)
+
+As of version 1.2.2+, the `setupAiDebugging` function has been improved to handle complex test setups:
+
+```typescript
+// tests/base.ts
+import { test as baseTest } from './your-existing-test-setup'; // Your existing test with fixtures
+import { setupAiDebugging } from 'playwright-vision-ai-debugger';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
+
+// The enhanced setupAiDebugging function will work with most complex test setups
+export const test = setupAiDebugging(baseTest);
+
+// Re-export everything else from your original test setup
+export * from './your-existing-test-setup';
+```
+
+### Method 2: Direct afterEach Hook Integration
+
+If Method 1 doesn't work with your test setup, you can use this more direct approach:
+
+```typescript
+// tests/ai-base.ts
+import { test as baseTest } from './your-existing-test-setup';
+import { runAiDebuggingAnalysis } from 'playwright-vision-ai-debugger';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
+
+// Add AI debugging through an afterEach hook
+baseTest.afterEach(async ({ page, customPage }, testInfo) => {
+  // Only run AI debugging for failed tests
+  if (testInfo.status === 'failed' && testInfo.error) {
+    try {
+      // Convert the error to ensure it has the right properties
+      const error = testInfo.error instanceof Error
+        ? testInfo.error
+        : new Error(String(testInfo.error));
+      
+      // Use whichever page object is available in your fixtures
+      const pageToUse = customPage || page;
+      
+      // Run the AI debugging analysis
+      await runAiDebuggingAnalysis(pageToUse, testInfo, error);
+    } catch (e) {
+      console.error('Error in AI debugging:', e);
+    }
+  }
+});
+
+// Export your test with AI debugging capabilities
+export const test = baseTest;
+
+// Re-export everything else
+export * from './your-existing-test-setup';
 ```
 
 ## Usage

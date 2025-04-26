@@ -1,10 +1,10 @@
 {
   "name": "playwright-vision-ai-debugger",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "AI-powered visual debugging overlay for Playwright tests using Gemini 1.5",
-  "main": "dist/src/index.js",
-  "module": "dist/src/index.js",
-  "types": "dist/src/index.d.ts",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
   "files": [
     "dist",
     "README.md",

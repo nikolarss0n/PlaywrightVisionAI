@@ -117,6 +117,66 @@ export function setupNetworkCapture(page: Page): {
 }
 
 /**
+ * Sets up automatic network capture for a test framework
+ * This creates a cleaner, more elegant integration with minimal boilerplate
+ * @param testObject The test object to enhance with network capture
+ * @returns The enhanced test object
+ */
+export function setupAutomaticNetworkCapture(testObject: any): any {
+  // Storage for captured network requests and teardown functions
+  const testNetworkRequests = new Map<string, NetworkRequest[]>();
+  const testNetworkCaptureTeardowns = new Map<string, Function>();
+
+  // Add beforeEach hook to start capturing network requests
+  testObject.beforeEach(async ({ page, context, customPage }: any, testInfo: any) => {
+    // Use either the custom page, standard page, or get a page from context
+    const pageToUse = customPage || page || (context ? await context.newPage() : null);
+    
+    if (pageToUse) {
+      // Set up network capture for this test
+      const { networkRequests, teardown } = setupNetworkCapture(pageToUse);
+      
+      // Store references for this test
+      testNetworkRequests.set(testInfo.testId, networkRequests);
+      testNetworkCaptureTeardowns.set(testInfo.testId, teardown);
+    }
+  });
+
+  // Add afterEach hook to clean up and access captured requests
+  testObject.afterEach(async ({}: any, testInfo: any) => {
+    // Clean up event listeners
+    const teardown = testNetworkCaptureTeardowns.get(testInfo.testId);
+    if (teardown) {
+      teardown();
+      testNetworkCaptureTeardowns.delete(testInfo.testId);
+    }
+    
+    // Store the network requests in testInfo for later access
+    // This allows other afterEach hooks to access the captured requests
+    if (testNetworkRequests.has(testInfo.testId)) {
+      const requests = testNetworkRequests.get(testInfo.testId);
+      // @ts-ignore: Adding a custom property to testInfo
+      testInfo._capturedNetworkRequests = requests;
+      
+      // Clean up
+      testNetworkRequests.delete(testInfo.testId);
+    }
+  });
+  
+  return testObject;
+}
+
+/**
+ * Gets captured network requests from a TestInfo object
+ * @param testInfo The TestInfo object potentially containing captured requests
+ * @returns Array of captured network requests or empty array
+ */
+export function getCapturedNetworkRequests(testInfo: any): NetworkRequest[] {
+  // @ts-ignore: Accessing custom property from testInfo
+  return testInfo._capturedNetworkRequests || [];
+}
+
+/**
  * Formats network requests for AI analysis
  */
 export function formatNetworkRequestsForAi(networkRequests: NetworkRequest[]): string {

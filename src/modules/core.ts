@@ -33,6 +33,8 @@ import {
   logWarningBox,
   logAnalysisComplete
 } from './consoleLogger';
+// Import NetworkRequest type
+import { NetworkRequest } from './types';
 
 /**
  * Orchestrates the AI debugging analysis process for a failed Playwright test.
@@ -40,8 +42,14 @@ import {
  * @param page The Playwright Page object.
  * @param testInfo The Playwright TestInfo object.
  * @param error The Error object from the failed test.
+ * @param existingNetworkRequests Optional array of already captured network requests
  */
-export async function runAiDebuggingAnalysis(page: Page, testInfo: TestInfo, error: Error): Promise<void> {
+export async function runAiDebuggingAnalysis(
+  page: Page, 
+  testInfo: TestInfo, 
+  error: any,
+  existingNetworkRequests?: NetworkRequest[]
+): Promise<void> {
   let aiAnalysisResult: any = null;
   let aiAnalysisHtml = '<p>AI Analysis could not be performed.</p>';
   let usageInfoHtml = '';
@@ -72,20 +80,31 @@ export async function runAiDebuggingAnalysis(page: Page, testInfo: TestInfo, err
       console.warn("⚠️ Could not extract test code.");
     }
     
-    // Set up network capture for the current page
-    const { networkRequests, teardown } = setupNetworkCapture(page);
+    // Network request handling - use existing requests if provided
+    let networkRequests: NetworkRequest[] = existingNetworkRequests || [];
+    let teardown = () => {}; // Default no-op function
     
-    // Also check for existing network request attachments
-    try {
-      const attachedRequests = extractNetworkRequestsFromAttachments(testInfo);
-      if (attachedRequests && !attachedRequests.startsWith('No network requests')) {
-        console.log("✅ Found network requests in test attachments.");
-      } else if (networkRequests.length === 0) {
-        console.warn("⚠️ No network requests found in test attachments.");
+    // Only set up network capture if we don't already have network requests
+    if (!existingNetworkRequests || existingNetworkRequests.length === 0) {
+      // Set up network capture for the current page
+      const capture = setupNetworkCapture(page);
+      networkRequests = capture.networkRequests;
+      teardown = capture.teardown;
+      
+      // Also check for existing network request attachments
+      try {
+        const attachedRequests = extractNetworkRequestsFromAttachments(testInfo);
+        if (attachedRequests && !attachedRequests.startsWith('No network requests')) {
+          console.log("✅ Found network requests in test attachments.");
+        } else if (networkRequests.length === 0) {
+          console.warn("⚠️ No network requests found in test attachments.");
+        }
+      } catch (networkError: unknown) {
+        const errorMessage = networkError instanceof Error ? networkError.message : String(networkError);
+        console.warn(`⚠️ Could not extract network requests from attachments: ${errorMessage}`);
       }
-    } catch (networkError: unknown) {
-      const errorMessage = networkError instanceof Error ? networkError.message : String(networkError);
-      console.warn(`⚠️ Could not extract network requests from attachments: ${errorMessage}`);
+    } else {
+      console.log(`✅ Using ${existingNetworkRequests.length} pre-captured network requests.`);
     }
     
     // Context gathering complete
@@ -179,27 +198,161 @@ export async function runAiDebuggingAnalysis(page: Page, testInfo: TestInfo, err
 
 /**
  * Sets up AI debugging for a test suite.
+ * Supports both simple and complex test setups (with custom fixtures).
  * @param testInstance The test instance to attach the debugging hook to
  */
-export function setupAiDebugging(testInstance: unknown): void {
-  // Cast to a minimal interface that matches the test.afterEach structure
-  const test = testInstance as { afterEach: (fn: (fixtures: Record<string, unknown>, testInfo: Record<string, unknown>) => Promise<void>) => void };
-  
-  test.afterEach(async (fixtures: Record<string, unknown>, testInfo: Record<string, unknown>) => {
-    // Only run for failed tests with an error and page object
-    if (testInfo.status === 'failed' && testInfo.error && fixtures.page) {
-      try {
-        // Convert the error to ensure it has the right properties
-        const error = testInfo.error instanceof Error
-          ? testInfo.error
-          : new Error(String(testInfo.error));
-        
-        // Cast page and testInfo to appropriate types for the analysis function
-        const page = fixtures.page as Page;
-        await runAiDebuggingAnalysis(page, testInfo as unknown as TestInfo, error);
-      } catch (e) {
-        console.error('Error in AI debugging:', e);
-      }
+export function setupAiDebugging(testInstance: any): any {
+  if (!testInstance) {
+    console.error("Test instance is undefined or null. Cannot set up AI debugging.");
+    return testInstance;
+  }
+
+  // Method 1: Try to handle complex test setups with custom fixtures
+  if (typeof testInstance.extend === 'function') {
+    try {
+      // Create a new test instance with the AI debugging capability
+      const enhancedTest = testInstance.extend({
+        page: async ({ page }: { page: Page }, use: (page: Page) => Promise<void>, testInfo: TestInfo) => {
+          // Process the page with the AI debugging capability
+          try {
+            await use(page);
+          } catch (error: any) {
+            // On test failure, run AI debugging
+            if (page && testInfo.status === 'failed') {
+              try {
+                // Preserve the original error without conversion - let extractErrorInfo handle it
+                console.log("Running AI debugging with original error object");
+                await runAiDebuggingAnalysis(page, testInfo, error);
+              } catch (aiError) {
+                console.error('Error in AI debugging:', aiError);
+              }
+            }
+            // Re-throw the original error to maintain test behavior
+            throw error;
+          }
+        }
+      });
+      
+      return enhancedTest;
+    } catch (error) {
+      console.warn("Could not extend test with AI debugging. Falling back to afterEach hook method.");
+      // Fall back to Method 2 if extending fails
     }
-  });
+  }
+
+  // Method 2: Use afterEach hook (more compatible with different test setups)
+  try {
+    testInstance.afterEach(async ({ page, customPage }: { page?: Page, customPage?: Page }, testInfo: TestInfo) => {
+      // Use whichever page object is available
+      const activePage = customPage || page;
+      
+      if (testInfo.status === 'failed' && testInfo.error && activePage) {
+        try {
+          // Pass the original error directly without conversion - let extractErrorInfo handle it
+          console.log("Running AI debugging with original testInfo.error object");
+          await runAiDebuggingAnalysis(activePage, testInfo, testInfo.error);
+        } catch (e) {
+          console.error('Error in AI debugging:', e);
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Failed to set up AI debugging:", error);
+  }
+
+  // Return the original or enhanced test instance
+  return testInstance;
+}
+
+/**
+ * Enhanced setup function for AI debugging - combines network capture and AI debugging
+ * Provides elegant one-line integration for complex test setups
+ * 
+ * @param testInstance The test instance to enhance with AI debugging and network capture
+ * @param options Optional configuration options
+ * @returns The enhanced test instance with AI debugging and network capture
+ */
+export function enhanceTestWithAiDebugging(
+  testInstance: any,
+  options: {
+    runOnlyOnFailure?: boolean;
+    customPageProperty?: string;
+    includeNetworkCapture?: boolean;
+  } = {}
+): any {
+  // Default options
+  const opts = {
+    runOnlyOnFailure: true,
+    customPageProperty: 'customPage',
+    includeNetworkCapture: true,
+    ...options
+  };
+  
+  if (!testInstance) {
+    console.error("Test instance is undefined or null. Cannot set up AI debugging.");
+    return testInstance;
+  }
+
+  // Set up automatic network capture if requested
+  let enhancedTest = testInstance;
+  if (opts.includeNetworkCapture) {
+    try {
+      const { setupAutomaticNetworkCapture, getCapturedNetworkRequests } = require('./networkCapture');
+      enhancedTest = setupAutomaticNetworkCapture(testInstance);
+      console.log("✅ Automatic network capture enabled.");
+    } catch (error) {
+      console.warn("⚠️ Failed to set up automatic network capture:", error);
+      // Continue with the original test instance if network setup fails
+      enhancedTest = testInstance;
+    }
+  }
+
+  // Now, add the AI debugging afterEach hook
+  try {
+    // Fix: Use proper object destructuring pattern for Playwright fixtures
+    enhancedTest.afterEach(async ({ page, ...restFixtures }: { page?: Page; [key: string]: any }, testInfo: TestInfo) => {
+      // Use the specified page property or fall back to standard page
+      // Handle custom page property in a type-safe way
+      const customPage = opts.customPageProperty ? restFixtures[opts.customPageProperty] : undefined;
+      const pageToUse = customPage || page;
+      
+      // Run AI debugging based on runOnlyOnFailure option and test status
+      const shouldRunDebugging = opts.runOnlyOnFailure 
+        ? testInfo.status === 'failed' && testInfo.error && pageToUse
+        : pageToUse !== undefined;
+      
+      if (shouldRunDebugging) {
+        try {
+          console.log(`Running AI debugging for test: ${testInfo.title}`);
+          
+          // Get any captured network requests if network capture is enabled
+          let networkRequests = [];
+          if (opts.includeNetworkCapture) {
+            try {
+              const { getCapturedNetworkRequests } = require('./networkCapture');
+              networkRequests = getCapturedNetworkRequests(testInfo) || [];
+              console.log(`Found ${networkRequests.length} captured network requests.`);
+            } catch (e) {
+              console.warn("⚠️ Could not get captured network requests:", e);
+            }
+          }
+          
+          // Get the error from testInfo
+          const error = testInfo.error || new Error("Test debugger invoked without an error");
+          
+          // Run the AI debugging analysis with the captured network requests
+          await runAiDebuggingAnalysis(pageToUse, testInfo, error, networkRequests);
+        } catch (e) {
+          console.error('❌ Error in AI debugging:', e);
+        }
+      }
+    });
+    
+    console.log("✅ AI debugging enhancement complete.");
+  } catch (error) {
+    console.error("❌ Failed to set up AI debugging:", error);
+  }
+
+  // Return the enhanced test instance
+  return enhancedTest;
 }
