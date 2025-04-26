@@ -390,7 +390,8 @@ export function generateHtmlReport({
 
         /* AI content area */
         .ai-content-area p { 
-            margin-bottom: 0.75rem; 
+            margin-bottom: 0.75rem;
+            margin-top: 0.5rem;
             line-height: 1.6;
         }
         
@@ -425,9 +426,6 @@ export function generateHtmlReport({
         
         /* Enhanced heading styling */
         .ai-content-area h3 {
-            border-bottom: 1px solid var(--claude-purple);
-            padding-bottom: 0.5rem;
-            margin-top: 1.5rem;
             color: var(--claude-orange);
         }
         
@@ -611,7 +609,7 @@ export function generateHtmlReport({
         .ai-filter-btn {
             padding: 4px 12px;
             margin-right: 4px;
-            border-radius: 4px 4px 0 0;
+            border-radius: 7px;
             background-color: rgba(40, 42, 44, 0.8);
             color: var(--text-color);
             border: 1px solid var(--terminal-border);
@@ -639,7 +637,7 @@ export function generateHtmlReport({
             background-color: rgba(37, 39, 40, 0.8);
             border-radius: 7px;
             padding: 0.75rem 1rem;
-            border-bottom: 1px solid var(--claude-orange)
+            border-bottom: 1px solid var(--claude-orange);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -794,7 +792,9 @@ export function generateHtmlReport({
   const networkTabStart = `
                     <!-- Network Requests Tab -->
                     <div class="tab-content" id="network-tab">
-                        <h2>Network Requests</h2>
+                        <div class="card-header">
+                            <h2 class="card-title">Network Requests</h2>
+                        </div>
                         <div class="mb-4">
                             <input type="text" id="networkSearch" placeholder="Search network requests..." 
                                 onkeyup="filterNetworkRequests()">
@@ -1275,6 +1275,28 @@ export function generateHtmlReport({
             document.querySelectorAll('pre code').forEach((block) => {
                 hljs.highlightElement(block);
             });
+            
+            // Apply card-header styling to headings in the AI Analysis tab
+            const aiContainer = document.getElementById('aiContentContainer');
+            if (aiContainer) {
+                const h3Elements = aiContainer.querySelectorAll('h3');
+                h3Elements.forEach(h3 => {
+                    // Create a new div with the card-header class
+                    const headerDiv = document.createElement('div');
+                    headerDiv.className = 'card-header';
+                    
+                    // Clone the h3 and add the card-title class
+                    const newHeading = h3.cloneNode(true);
+                    newHeading.className = 'card-title';
+                    
+                    // Insert the heading into the header div
+                    headerDiv.appendChild(newHeading);
+                    
+                    // Replace the original h3 with the header div
+                    h3.parentNode.insertBefore(headerDiv, h3);
+                    h3.remove();
+                });
+            }
         });
     </script>
 </body>
