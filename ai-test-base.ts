@@ -30,17 +30,6 @@ interface AiAnalysisInput {
   networkRequests?: string; // Network request logs
 }
 
-// Helper function to escape HTML characters (Corrected)
-function escapeHtml(unsafe: string | undefined | null): string {
-  if (!unsafe) return '';
-  return unsafe
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
 /**
  * Attempts to extract test code from the test file
  * @param testInfo TestInfo object from Playwright
@@ -175,7 +164,7 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
       if (requestData) {
         try {
           // Try to get response body for XHR/fetch/API responses
-          let responseBody;
+            let responseBody: string | undefined;
           if (
             requestData.resourceType === 'xhr' || 
             requestData.resourceType === 'fetch' ||
@@ -303,8 +292,23 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
               : networkRequests.slice(-20); // If no API requests, use last 20 of any type
             
             // Format nicely for AI analysis
+            // Define an interface for the formatted request info object
+            interface FormattedRequestInfo {
+                url: string;
+                method: string;
+                resourceType: string;
+                status: number | string;
+                timestamp: string;
+                requestHeaders?: Record<string, string>;
+                responseHeaders?: Record<string, string>;
+                requestBody?: unknown;
+                requestData?: string;
+                responseBody?: unknown;
+                responseData?: string;
+            }
+
             const formattedRequests = relevantRequests.map(req => {
-              const requestInfo: any = {
+              const requestInfo: FormattedRequestInfo = {
                 url: req.url,
                 method: req.method,
                 resourceType: req.resourceType,
@@ -425,8 +429,8 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
           await saveAndAttachReport(
             testInfo,
             htmlReport,
-            aiAnalysisResult?.analysisMarkdown,
-            aiAnalysisResult?.usageInfoMarkdown
+            aiAnalysisResult?.analysisMarkdown || undefined,
+            aiAnalysisResult?.usageInfoMarkdown || undefined
           );
           // --- End Save and Attach Report ---
 

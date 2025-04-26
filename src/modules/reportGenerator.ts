@@ -421,7 +421,7 @@ export function generateHtmlReport({
             border: none;
             height: 1px;
             background: linear-gradient(90deg, transparent, var(--claude-purple) 50%, transparent);
-            margin: 1.5rem 0;
+            margin: 1rem 0px 2rem
         }
         
         /* Enhanced heading styling */
@@ -722,7 +722,6 @@ export function generateHtmlReport({
                                 <p><strong>Browser:</strong> ${escapeHtml(testInfo.project.name)}</p>
                                 <p><strong>Status:</strong> <span class="text-error">failed</span></p>
                                 <p><strong>Duration:</strong> ${testInfo.duration}ms</p>
-                                <p><strong>Timestamp:</strong> ${new Date(testInfo.startTime).toLocaleString()}</p>
                             </div>
                         </div>
 
@@ -827,7 +826,7 @@ export function generateHtmlReport({
   // Generate network rows
   const networkTableRows = networkRequests.length > 0 
     ? networkRequests.map((req, index) => {
-        const statusClass = req.status >= 400 ? 'status-error' : (req.status >= 300 ? 'status-redirect' : 'status-success');
+        const statusClass = (req.status ?? 0) >= 400 ? 'status-error' : ((req.status ?? 0) >= 300 ? 'status-redirect' : 'status-success');
         const methodClass = req.method?.toLowerCase() === 'get' ? 'method-get' : 
                           req.method?.toLowerCase() === 'post' ? 'method-post' :
                           req.method?.toLowerCase() === 'put' ? 'method-put' :
@@ -847,16 +846,16 @@ export function generateHtmlReport({
                                     <tr id="request-${index}" class="hidden">
                                         <td colspan="6">
                                             <div class="text-xs">
-                                                ${req.postData ? `
+                                                ${req.requestPostData ? `
                                                 <div class="mb-4">
                                                     <strong class="text-link">Request Data:</strong>
                                                     <pre><code>${escapeHtml(
                                                         (() => {
                                                             try {
-                                                                const json = JSON.parse(req.postData);
+                                                                const json = JSON.parse(req.requestPostData);
                                                                 return JSON.stringify(json, null, 2);
                                                             } catch (e) {
-                                                                return req.postData;
+                                                                return req.requestPostData;
                                                             }
                                                         })()
                                                     )}</code></pre>
