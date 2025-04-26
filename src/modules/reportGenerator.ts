@@ -466,11 +466,11 @@ export function generateHtmlReport({
         }
 
         .tab-buttons {
-            display: flex;
             overflow-x: auto;
             border-bottom: 1px solid var(--terminal-border);
-            background-color: rgba(20, 22, 23, 0.8);
-            padding: 0 0.5rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+            padding-bottom: 0.5rem;
         }
 
         .tab-button {
@@ -479,17 +479,17 @@ export function generateHtmlReport({
             color: var(--dim-color);
             border: none;
             border-bottom: 2px solid transparent;
-            border-radius: 0;
+            border-radius: 7px;
             font-size: 0.85rem;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.2s ease;
-            position: relative;
         }
 
         .tab-button:hover {
             color: var(--heading-color);
             background-color: var(--tab-hover);
+            border-radius: 7px;
         }
 
         .tab-button.active {
@@ -637,8 +637,9 @@ export function generateHtmlReport({
 
         .card-header {
             background-color: rgba(37, 39, 40, 0.8);
+            border-radius: 7px;
             padding: 0.75rem 1rem;
-            border-bottom: 1px solid var(--terminal-border);
+            border-bottom: 1px solid var(--claude-orange)
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -670,6 +671,7 @@ export function generateHtmlReport({
             }
 
             .tab-button {
+                border-radius: 7px;
                 flex: 1 1 auto;
                 padding: 0.5rem;
                 font-size: 0.75rem;
@@ -775,8 +777,6 @@ export function generateHtmlReport({
                     <!-- AI Analysis Tab -->
                     <div class="tab-content" id="ai-tab">
                         <div class="mb-4">
-                            <input type="text" id="aiSearchInput" placeholder="Search AI analysis..." 
-                                onkeyup="searchAiContent()">
                             <div class="ai-filter-tabs">
                                 <button class="ai-filter-btn active-filter" data-filter="all" onclick="filterAiContent('all')">All</button>
                                 <button class="ai-filter-btn" data-filter="root-cause" onclick="filterAiContent('root-cause')">Root Cause</button>
@@ -1221,21 +1221,50 @@ export function generateHtmlReport({
             
             // Helper function to highlight sections with specific keywords
             function highlightSections(keywords) {
-                const allElements = container.querySelectorAll('.card');
+                // Get all section elements - each section starts with an h3 and ends at the next h3 or end of container
+                const sections = [];
+                const headings = container.querySelectorAll('h3');
                 
-                allElements.forEach(el => {
-                    const text = el.textContent.toLowerCase();
-                    let shouldShow = false;
+                headings.forEach((heading, index) => {
+                    // Create a section object with the heading and all elements until next heading
+                    const section = {
+                        heading: heading,
+                        elements: []
+                    };
                     
+                    // Get all elements after this heading until the next heading
+                    let currentElement = heading.nextElementSibling;
+                    while (currentElement && currentElement.tagName !== 'H3') {
+                        section.elements.push(currentElement);
+                        currentElement = currentElement.nextElementSibling;
+                    }
+                    
+                    // Add this section to our sections array
+                    sections.push(section);
+                });
+                
+                // Now filter each section based on keywords
+                sections.forEach(section => {
+                    // Get the text content of the entire section
+                    let sectionText = section.heading.textContent.toLowerCase();
+                    section.elements.forEach(el => {
+                        sectionText += ' ' + el.textContent.toLowerCase();
+                    });
+                    
+                    let shouldShow = false;
                     for (const keyword of keywords) {
-                        if (text.includes(keyword)) {
+                        if (sectionText.includes(keyword)) {
                             shouldShow = true;
                             break;
                         }
                     }
                     
                     if (!shouldShow) {
-                        el.style.display = 'none';
+                        // Hide this section
+                        section.heading.style.display = 'none';
+                        section.elements.forEach(el => {
+                            el.style.display = 'none';
+                        });
                     }
                 });
             }
