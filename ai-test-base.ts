@@ -12,8 +12,11 @@ import {
   createCenteredHeader,
   wrapTextInBox,
 } from './aiDebugger'; // Assuming './aiDebugger.ts'
+// Import the report generation functions with corrected path - ensure they are imported correctly
+import { generateHtmlReport, saveAndAttachReport } from './src/modules/reportGenerator.js';
 import { extractSelectorFromError } from './errorUtils'; // Assuming './errorUtils.ts'
 import * as fs from 'node:fs';
+import type { NetworkRequest } from './src/modules/types'; // Import NetworkRequest type (updated to accept null)
 
 // Define the shape of the AI analysis input (remains the same)
 interface AiAnalysisInput {
@@ -27,7 +30,7 @@ interface AiAnalysisInput {
   networkRequests?: string; // Network request logs
 }
 
-// Helper function to escape HTML characters (remains the same)
+// Helper function to escape HTML characters (Corrected)
 function escapeHtml(unsafe: string | undefined | null): string {
   if (!unsafe) return '';
   return unsafe
@@ -71,79 +74,143 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
 
   // Browser context options
   async context({ context }, use, testInfo) {
-    // Start tracing before using the context
-    await context.tracing.start({
-      screenshots: true,
-      snapshots: true,
-      sources: true
-    });
+    // Only start tracing if not already started
+    let tracingStarted = false;
     
-    await use(context);
-    
-    // After the test runs, stop tracing and save to a file
-    if (testInfo.status !== 'passed') {
-      await context.tracing.stop({
-        path: testInfo.outputPath('trace.zip')
-      });
-    } else {
-      await context.tracing.stop();
+    try {
+      // Start fresh tracing session (only if not already started)
+      try {
+        await context.tracing.start({
+          screenshots: true,
+          snapshots: true,
+          sources: true
+        });
+        tracingStarted = true;
+        console.log("✓ Tracing started successfully.");
+      } catch (error) {
+        if (error.message.includes("Tracing has been already started")) {
+          console.log("ℹ️ Tracing was already started, continuing with existing trace.");
+          tracingStarted = true;
+        } else {
+          console.error("❌ Failed to start tracing:", error.message);
+        }
+      }
+      
+      // Use the context
+      await use(context);
+    } finally {
+      // Only stop tracing if we successfully started it
+      if (tracingStarted && testInfo.status !== 'passed') {
+        try {
+          await context.tracing.stop({
+            path: testInfo.outputPath('trace.zip')
+          });
+          console.log("✓ Trace saved to:", testInfo.outputPath('trace.zip'));
+        } catch (error) {
+          console.error("❌ Failed to stop tracing:", error.message);
+        }
+      } else if (tracingStarted) {
+        try {
+          await context.tracing.stop();
+          console.log("✓ Tracing stopped (test passed, no trace saved).");
+        } catch (error) {
+          console.error("❌ Failed to stop tracing:", error.message);
+        }
+      }
     }
   },
 
   // Define an afterEach hook
   async page({ page }, use, testInfo: TestInfo) {
-    // Store captured network requests
-    const networkRequests: Array<{
-      url: string;
-      method: string;
-      status?: number;
-      timestamp: string;
-      requestHeaders?: Record<string, string>;
-      responseHeaders?: Record<string, string>;
-    }> = [];
+    // Store captured network requests (Use imported NetworkRequest type)
+    const networkRequests: NetworkRequest[] = [];
     
     // Store request-response pairs for correlation
     const requestMap = new Map<string, {
       url: string;
       method: string;
       timestamp: string;
+      resourceType: string;
       requestHeaders: Record<string, string>;
+      requestPostData?: string | null; // Align with Playwright's return type
     }>();
     
     // Generate a unique ID counter
     let requestCounter = 0;
     
-    // Listen for network requests
-    page.on('request', request => {
+    // Listen for network requests - capture ALL request types
+    page.on('request', async request => {
       const uniqueId = `req_${++requestCounter}`;
       const timestamp = new Date().toISOString();
       
-      // Only track important network requests (not images, fonts, etc.)
-      if (
-        request.resourceType() === 'xhr' ||
-        request.resourceType() === 'fetch' ||
-        request.resourceType() === 'document'
-      ) {
-        requestMap.set(request.url(), {
-          url: request.url(),
-          method: request.method(),
-          timestamp,
-          requestHeaders: request.headers()
-        });
+      // Store all request types but prioritize API calls
+      const resourceType = request.resourceType();
+      let requestPostData: string | null = null;
+      
+      // Try to capture POST data when available
+      try {
+        if (request.method() === 'POST' || request.method() === 'PUT' || request.method() === 'PATCH') {
+          requestPostData = request.postData();
+        }
+      } catch (err) {
+        // Ignore errors in getting post data
       }
+      
+      // Track all requests but add importance flag for XHR/fetch/document
+      requestMap.set(request.url(), {
+        url: request.url(),
+        method: request.method(),
+        timestamp,
+        resourceType,
+        requestHeaders: request.headers(),
+        requestPostData: requestPostData ?? undefined
+      });
     });
     
     // Listen for responses
-    page.on('response', response => {
+    page.on('response', async response => {
       const url = response.url();
       const requestData = requestMap.get(url);
       
       if (requestData) {
-        networkRequests.push({
-          ...requestData,
-          status: response.status(),
-          responseHeaders: response.headers()
-        });
+        try {
+          // Try to get response body for XHR/fetch/API responses
+          let responseBody;
+          if (
+            requestData.resourceType === 'xhr' || 
+            requestData.resourceType === 'fetch' ||
+            response.headers()['content-type']?.includes('application/json')
+          ) {
+            try {
+              // Only try to get text for non-binary responses
+              const contentType = response.headers()['content-type'] || '';
+              if (
+                contentType.includes('json') || 
+                contentType.includes('text') || 
+                contentType.includes('javascript') ||
+                contentType.includes('xml')
+              ) {
+                responseBody = await response.text().catch(() => undefined);
+              }
+            } catch (textError) {
+              // Ignore text extraction errors
+            }
+          }
+          
+          networkRequests.push({
+            ...requestData,
+            status: response.status(),
+            responseHeaders: response.headers(),
+            responseBody
+          });
+        } catch (responseError) {
+          // If we fail to process the response, still add the basic info
+          networkRequests.push({
+            ...requestData,
+            status: response.status(),
+            responseHeaders: response.headers()
+          });
+        }
         
         // Remove from map to avoid duplicate entries
         requestMap.delete(url);
@@ -160,8 +227,6 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
         let aiAnalysisResult: AiDebuggingResult | null = null; // To store AI result
         let aiAnalysisHtml = '<p>AI Analysis could not be performed.</p>'; // Default HTML content
         let usageInfoHtml = ''; // Default usage HTML
-        // Initialize combinedAnalysis to prevent reference errors
-        let combinedAnalysis = '';
 
         try {
           // --- Context Gathering ---
@@ -225,31 +290,79 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
           // --- Prepare Network Requests Data ---
           let networkRequestsData = "No network requests captured.";
           if (networkRequests.length > 0) {
-            // Limit to last 20 requests if there are too many
-            const relevantRequests = networkRequests.slice(-20);
+            // Filter only the most important requests for the AI analysis
+            const apiRequestsOnly = networkRequests.filter(req => 
+              req.resourceType === 'xhr' || 
+              req.resourceType === 'fetch' || 
+              (req.responseHeaders?.['content-type']?.includes('json') || 
+               req.responseHeaders?.['content-type']?.includes('application/javascript'))
+            );
+            
+            const relevantRequests = apiRequestsOnly.length > 0 
+              ? apiRequestsOnly.slice(-20)  // Limit to last 20 API requests 
+              : networkRequests.slice(-20); // If no API requests, use last 20 of any type
             
             // Format nicely for AI analysis
-            const formattedRequests = relevantRequests.map(req => ({
-              url: req.url,
-              method: req.method,
-              status: req.status || 'No status',
-              timestamp: req.timestamp,
-              requestHeaders: req.requestHeaders ?
-                Object.fromEntries(
+            const formattedRequests = relevantRequests.map(req => {
+              const requestInfo: any = {
+                url: req.url,
+                method: req.method,
+                resourceType: req.resourceType,
+                status: req.status || 'No status',
+                timestamp: req.timestamp
+              };
+              
+              // Add important headers
+              if (req.requestHeaders) {
+                requestInfo.requestHeaders = Object.fromEntries(
                   Object.entries(req.requestHeaders)
-                    .filter(([key]) => ['content-type', 'authorization', 'accept'].includes(key.toLowerCase()))
-                ) : {},
-              responseHeaders: req.responseHeaders ?
-                Object.fromEntries(
+                    .filter(([key]) => [
+                      'content-type', 'authorization', 'accept', 
+                      'x-requested-with', 'referer'
+                    ].includes(key.toLowerCase()))
+                );
+              }
+              
+              if (req.responseHeaders) {
+                requestInfo.responseHeaders = Object.fromEntries(
                   Object.entries(req.responseHeaders)
-                    .filter(([key]) => ['content-type'].includes(key.toLowerCase()))
-                ) : {}
-            }));
+                    .filter(([key]) => [
+                      'content-type', 'content-length', 'cache-control',
+                      'status', 'x-powered-by'
+                    ].includes(key.toLowerCase()))
+                );
+              }
+              
+              // Add request/response body if available and is an API call
+              if (req.resourceType === 'xhr' || req.resourceType === 'fetch') {
+                if (req.requestPostData) {
+                  try {
+                    const parsedData = JSON.parse(req.requestPostData);
+                    requestInfo.requestBody = parsedData;
+                  } catch (e) {
+                    requestInfo.requestData = req.requestPostData.substring(0, 500) + 
+                      (req.requestPostData.length > 500 ? '... (truncated)' : '');
+                  }
+                }
+                
+                if (req.responseBody) {
+                  try {
+                    const parsedData = JSON.parse(req.responseBody);
+                    requestInfo.responseBody = parsedData;
+                  } catch (e) {
+                    requestInfo.responseData = req.responseBody.substring(0, 500) + 
+                      (req.responseBody.length > 500 ? '... (truncated)' : '');
+                  }
+                }
+              }
+              
+              return requestInfo;
+            });
             
             networkRequestsData = JSON.stringify(formattedRequests, null, 2);
-            console.log(`✅ Captured ${formattedRequests.length} network requests from test execution.`);
+            console.log(`✅ Captured ${networkRequests.length} network requests (${formattedRequests.length} processed for AI analysis).`);
           } else {
-            // Try to get network requests from trace
+            // Try to get network requests from trace if available
             try {
               const tracePath = testInfo.outputPath('trace.zip');
               if (fs.existsSync(tracePath)) {
@@ -296,313 +409,45 @@ export const test = baseTest.extend<{ aiEnhancedPage: Page }>({
             usageInfoHtml = marked.parse(aiAnalysisResult.usageInfoMarkdown) as string;
           }
 
-          // --- Generate Final HTML Report ---
-          const reportTitle = `AI Debug Analysis: ${escapeHtml(testInfo.title)}`;
-          const backgroundImageUrlCss = `linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.4)), url('https://preview.redd.it/macos-sonoma-wallpapers-5120x2160-v0-j9vwvbq8h5wb1.jpg?width=5120&format=pjpg&auto=webp&s=943e6f75b62ea11c987d13b3ba7091abecd48ab6')`; // Example URL - Replace if needed
+          // --- Generate Report using imported function ---
+          const htmlReport = generateHtmlReport({
+            testInfo,
+            failingSelector: failingSelector || null, // Pass null if undefined
+            testCode,
+            errorMsg,
+            stackTrace,
+            networkRequests, // Pass the full network requests array
+            aiAnalysisHtml,
+            usageInfoHtml
+          });
 
-          const glassmorphismHtml = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${reportTitle}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        /* Reset box model for consistent layout */
-        * {
-            box-sizing: border-box;
-        }
+          // --- Save and Attach Report using imported function ---
+          await saveAndAttachReport(
+            testInfo,
+            htmlReport,
+            aiAnalysisResult?.analysisMarkdown,
+            aiAnalysisResult?.usageInfoMarkdown
+          );
+          // --- End Save and Attach Report ---
 
-        /* --- Fix for full-height background --- */
-        html {
-            position: relative; /* Establish positioning context for ::before */
-            min-height: 100%;   /* Ensure html takes full height */
-        }
+          console.log(`${SEPARATOR}`);
+          console.log(createCenteredHeader("🤖 AI Debugging Complete 🤖"));
+          console.log(`${BOTTOM_BORDER}\n`);
 
-        html::before { /* Apply background to html pseudo-element */
-            content: '';
-            position: absolute; /* Position relative to <html> */
-            top: 0; left: 0; right: 0; bottom: 0; /* Cover <html> */
-            z-index: -1;
-
-            background-image: ${backgroundImageUrlCss};
-            background-size: cover, cover;
-            background-position: center center, center center;
-            background-attachment: fixed;
-
-            filter: blur(10px);
-            -webkit-filter: blur(10px);
-            transform: scale(1.05);
-        }
-        /* --- End Fix --- */
-
-
-        /* --- Core Styles --- */
-        body {
-            font-family: 'Inter', sans-serif;
-            min-height: 100vh;
-            box-sizing: border-box;
-            position: relative;
-            overflow-x: hidden;
-            background-color: #1a202c;
-        }
-
-        .glass-effect {
-            background: rgba(0, 0, 0, 0.55);
-            backdrop-filter: blur(16px) saturate(150%);
-            -webkit-backdrop-filter: blur(16px) saturate(150%);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.35);
-            position: relative;
-            z-index: 1;
-            color: #e5e7eb;
-        }
-
-        /* --- Styles for rendered Markdown --- */
-        .ai-content-area h3 { font-size: 1.1rem; font-weight: 600; margin-top: 1rem; margin-bottom: 0.5rem; color: #f9fafb; }
-        .ai-content-area p { margin-bottom: 0.75rem; line-height: 1.6; }
-        .ai-content-area code { background-color: rgba(0, 0, 0, 0.4); border-radius: 4px; padding: 3px 6px; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.9em; border: 1px solid rgba(255, 255, 255, 0.3); color: #93c5fd; display: inline-block; }
-        .ai-content-area pre { background-color: rgba(0,0,0,0.4); padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; overflow-x: auto;}
-        .ai-content-area pre code { display: block; white-space: pre; padding: 0; border: none; background: none; }
-        .ai-content-area strong { font-weight: 600; color: #dbeafe; }
-        .ai-content-area ul, .ai-content-area ol { margin-left: 1.5rem; margin-bottom: 1rem; list-style: revert; }
-        .ai-content-area li { margin-bottom: 0.25rem; }
-        .ai-content-area hr { border-color: rgba(255, 255, 255, 0.2); margin-top: 1rem; margin-bottom: 1rem; border-top-width: 1px;}
-        .ai-content-area table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
-        .ai-content-area th, .ai-content-area td { border: 1px solid rgba(255, 255, 255, 0.3); padding: 0.5rem; text-align: left; }
-        .ai-content-area th { background-color: rgba(255, 255, 255, 0.1); font-weight: 600; }
-        .ai-content-area details { background-color: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0.5rem; margin-bottom: 1rem;}
-        .ai-content-area summary { cursor: pointer; font-weight: 500; }
-
-
-        /* --- Heading Styles --- */
-        h2, h3 {
-            text-align: left !important;
-            position: relative !important;
-            font-family: 'Inter', sans-serif !important;
-            color: white !important;
-        }
-
-        /* Professional section styling */
-        .glass-effect {
-            padding: 1.75rem 2rem !important;
-        }
-
-        /* Heading styles */
-        .glass-effect h2,
-        .glass-effect h3 {
-            padding: 0 0 0.75rem 0 !important;
-            margin: 0 0 1.25rem 0 !important;
-            font-weight: bold !important;
-            letter-spacing: 0.01em !important;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.15) !important;
-        }
-
-        /* Content padding */
-        .glass-effect p,
-        .glass-effect div:not(.ai-content-area) {
-            padding: 0 0 0.5rem 0.5rem !important;
-            margin: 0 !important;
-        }
-
-        /* Special case for the first paragraph after a heading */
-        .glass-effect h2 + p,
-        .glass-effect h3 + p {
-            margin-top: 0.5rem !important;
-        }
-
-        /* AI content proper padding */
-        .ai-content-area {
-            padding: 0 0 0 0.3rem !important;
-            margin-top: 0.5rem !important;
-        }
-
-        /* Remove these conflicting rules */
-
-        /* --- Icon Styles --- */
-        @font-face { font-family: 'LucideIcons'; src: url(https://cdn.jsdelivr.net/npm/lucide-static@0.473.0/font/lucide.ttf) format('truetype'); }
-        .lucide {
-            font-family: 'LucideIcons';
-            font-size: 1.2em;
-            line-height: 1;
-            vertical-align: middle;
-            margin-right: 0.25em;
-            display: inline-block;
-            width: 1.2em;
-            text-align: center;
-        }
-        .lucide-clipboard-list::before { content: "\\e888"; color: #a5b4fc; }
-        .lucide-lightbulb::before { content: "\\eb1f"; color: #fbbf24; }
-        .lucide-alert-triangle::before { content: "\\e6c7"; color: #f87171; }
-        .lucide-brain-circuit::before { content: "\\ed94"; color: #86efac; }
-        .lucide-bar-chart-big::before { content: "\\e7e8"; color: #facc15; }
-
-
-        /* --- Other Helper Styles --- */
-        code.inline-code {
-            border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; padding: 2px 5px;
-            font-size: 0.9em; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
-            background-color: rgba(0,0,0,0.3); color: #93c5fd;
-        }
-        code.error-block-code {
-             display: block; background-color: rgba(153, 27, 27, 0.3); border: 1px solid rgba(220, 38, 38, 0.5);
-             padding: 0.75rem; border-radius: 0.375rem; color: #fecaca; font-size: 0.75rem;
-             font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
-             overflow-x: auto; white-space: pre-wrap; word-break: break-all;
-        }
-        details > summary { cursor: pointer; color: #d1d5db; }
-        details > summary:hover { color: #f9fafb; }
-        details > pre { margin-top: 0.25rem; padding: 0.5rem; background-color: rgba(0, 0, 0, 0.4); border-radius: 0.375rem; font-size: 0.75rem; color: #d1d5db; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
-        details > pre > code { background-color: transparent; border: none; padding: 0; color: inherit; display: block; }
-
-    </style>
-    <script>
-        tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'sans-serif'] } } } }
-    </script>
-</head>
-<body>
-    <main class="flex flex-col items-center space-y-8 w-full min-h-screen p-4 md:p-8">
-
-        <div class="glass-effect rounded-2xl max-w-3xl w-full">
-            <h2 class="text-2xl md:text-3xl font-bold text-white mb-2">Test Run Details</h2>
-             <p><strong>Test:</strong> ${escapeHtml(testInfo.title)}</p>
-             <p><strong>Status:</strong> <strong class="font-semibold ${testInfo.status === 'failed' ? 'text-red-300' : 'text-orange-300'}">${escapeHtml(testInfo.status)}</strong></p>
-             <p><strong>Duration:</strong> ${testInfo.duration}ms</p>
-             ${failingSelector ? `<p><strong>Failing Selector:</strong> <code class="inline-code">${escapeHtml(failingSelector)}</code></p>` : ''}
-             ${testCode ? `
-             <div class="mt-4">
-               <p><strong>Test Code:</strong></p>
-               <pre class="bg-gray-800 text-gray-200 p-3 rounded-md text-sm overflow-x-auto mt-2"><code>${escapeHtml(testCode)}</code></pre>
-             </div>
-             ` : ''}
-        </div>
-
-         <div class="glass-effect rounded-2xl max-w-3xl w-full">
-            <h3 class="text-lg md:text-xl font-semibold text-gray-50 mb-3">Failure Details</h3>
-            <p class="text-sm md:text-base leading-relaxed text-gray-200 mb-3">
-                 The test failed${failingSelector ? ` possibly while interacting with the element targeted by <code class="inline-code">${escapeHtml(failingSelector)}</code>` : ''}. See the error message and stack trace below.
-            </p>
-            <div class="mt-4 text-sm space-y-3">
-                <p><strong class="font-medium text-gray-50">Error Message:</strong>
-                    <code class="error-block-code">${escapeHtml(errorMsg)}</code>
-                </p>
-                ${stackTrace ? `<details class="mt-2">
-                        <summary>Show Stack Trace</summary>
-                        <pre><code>${escapeHtml(stackTrace)}</code></pre>
-                    </details>` : ''}
-            </div>
-        </div>
-
-        ${networkRequests.length > 0 ? `
-        <div class="glass-effect rounded-2xl max-w-3xl w-full">
-           <h3 class="text-lg md:text-xl font-semibold text-gray-50 mb-3">Network Requests</h3>
-           <p class="text-sm md:text-base leading-relaxed text-gray-200 mb-3">
-               The following network requests were captured during test execution.
-           </p>
-           <div class="overflow-x-auto">
-               <table class="w-full text-sm text-left text-gray-200">
-                   <thead class="text-xs uppercase bg-gray-800 bg-opacity-50 text-gray-300">
-                       <tr>
-                           <th class="px-4 py-2">Method</th>
-                           <th class="px-4 py-2">URL</th>
-                           <th class="px-4 py-2">Status</th>
-                           <th class="px-4 py-2">Content-Type</th>
-                       </tr>
-                   </thead>
-                   <tbody>
-                       ${networkRequests.map(req => `
-                       <tr class="bg-gray-800 bg-opacity-20 border-b border-gray-700">
-                           <td class="px-4 py-2 font-medium ${req.method === 'GET' ? 'text-blue-300' : req.method === 'POST' ? 'text-green-300' : req.method === 'PUT' ? 'text-yellow-300' : req.method === 'DELETE' ? 'text-red-300' : 'text-gray-300'}">${escapeHtml(req.method)}</td>
-                           <td class="px-4 py-2 font-mono text-xs overflow-hidden overflow-ellipsis" style="max-width: 200px;">${escapeHtml(req.url)}</td>
-                           <td class="px-4 py-2 ${(req.status && req.status >= 200 && req.status < 300) ? 'text-green-300' : (req.status && req.status >= 400) ? 'text-red-300' : 'text-gray-300'}">${req.status || 'N/A'}</td>
-                           <td class="px-4 py-2 font-mono text-xs">${escapeHtml(req.responseHeaders?.['content-type'] || 'N/A')}</td>
-                       </tr>
-                       `).join('')}
-                   </tbody>
-               </table>
-           </div>
-           <details class="mt-4">
-               <summary class="cursor-pointer text-gray-300 hover:text-white">View Raw Network Data</summary>
-               <pre class="mt-2 bg-gray-800 bg-opacity-50 p-3 rounded text-xs overflow-x-auto">${escapeHtml(JSON.stringify(networkRequests, null, 2))}</pre>
-           </details>
-        </div>
-        ` : ''}
-
-         <div class="glass-effect rounded-2xl max-w-3xl w-full">
-           <h3 class="text-lg md:text-xl font-semibold text-gray-50 mb-4">AI Debugging Analysis</h3>
-            <div class="ai-content-area text-sm md:text-base leading-relaxed text-gray-200">
-                ${aiAnalysisHtml}
-            </div>
-        </div>
-
-        ${usageInfoHtml ? `
-        <div class="glass-effect rounded-2xl max-w-3xl w-full">
-             <h3 class="text-lg md:text-xl font-semibold text-gray-50 mb-4">AI Usage & Estimated Cost</h3>
-             <div class="ai-content-area text-sm">
-                 ${usageInfoHtml}
-             </div>
-        </div>
-        ` : ''}
-
-    </main>
-</body>
-</html>
-`; // --- End HTML Generation ---
-
-          // --- Attach the FINAL HTML Report ---
-          try {
-            await testInfo.attach('ai-debug-analysis.html', {
-              body: glassmorphismHtml,
-              contentType: 'text/html',
-            });
-            console.log(`✅ Successfully attached 'ai-debug-analysis.html' report.`);
-          } catch (attachError: unknown) {
-            const errorMessage = attachError instanceof Error ? attachError.message : String(attachError);
-            console.error(`\n❌ Error attaching HTML report: ${errorMessage}`, attachError);
-          }
-
-          // --- Log AI analysis completion to console, but don't modify error stack ---
-          console.log(`\n${SEPARATOR}\n${createCenteredHeader("💡 AI Debugging Complete 💡")}\n${SEPARATOR}`);
-          console.log("AI analysis results attached to test report.");
-          console.log("View HTML report and markdown attachment for details.");
-
-          // --- Optional: Attach raw markdown as separate text file ---
-          try {
-            const rawAiContent = aiAnalysisResult?.errorMarkdown ?? aiAnalysisResult?.analysisMarkdown ?? "No AI content.";
-            await testInfo.attach('ai-suggestions-raw.md', {
-              body: `# AI Debugging Analysis\n\n${rawAiContent}\n\n---\n\n# Usage\n\n${aiAnalysisResult?.usageInfoMarkdown ?? "N/A"}`,
-              contentType: 'text/markdown',
-            });
-            console.log(`✅ Successfully attached 'ai-suggestions-raw.md'.`);
-          } catch (attachError: unknown) {
-            const errorMessage = attachError instanceof Error ? attachError.message : String(attachError);
-            console.warn(`⚠️ Could not attach AI suggestions as markdown file: ${errorMessage}`);
-          }
-
-        } catch (captureError: unknown) {
-          // --- Log Overall Capture/Processing Error ---
-          const errorMessage = captureError instanceof Error ? captureError.message : String(captureError);
-          console.error(`\n❌ Critical error during failure processing: ${errorMessage}`, captureError);
-          const captureErrorBox = `
-${TOP_BORDER}
-${createCenteredHeader("❌ Context Capture/Processing Error ❌")}
-${SEPARATOR}
-${wrapTextInBox("Failed to capture context, generate report, or call AI.")}
-${wrapTextInBox(`Error: ${errorMessage}`)}
-${BOTTOM_BORDER}
-`;
-          console.error(captureErrorBox);
-          // Log error but don't modify stack trace
-          console.error(`Context capture or AI processing failed: ${errorMessage}`);
+        } catch (processingError: unknown) {
+          const errorMessage = processingError instanceof Error ? processingError.message : String(processingError);
+          console.error(`\n❌ Critical error during failure processing: ${errorMessage}`, processingError);
+          // Log error box
+          console.log(`\n${TOP_BORDER}`);
+          console.log(createCenteredHeader("❌ Context Capture/Processing Error ❌"));
+          console.log(`${SEPARATOR}`);
+          console.log(wrapTextInBox(errorMessage));
+          console.log(`${BOTTOM_BORDER}\n`);
           // Attempt to attach a basic error report
           try {
             await testInfo.attach('ai-processing-error.txt', {
               body: `Error during AI analysis: ${errorMessage}\n\nStack trace: ${
-                captureError instanceof Error ? captureError.stack : 'No stack trace available'
+                processingError instanceof Error ? processingError.stack : 'No stack trace available'
               }`,
               contentType: 'text/plain',
             });
@@ -610,33 +455,18 @@ ${BOTTOM_BORDER}
             console.error('Could not attach error details.');
           }
         }
-      } else if (page.isClosed()) {
-        // --- Log Page Closed Warning --- (Same as before)
-        console.warn(`\n${TOP_BORDER}`);
-        console.warn(createCenteredHeader("⚠️ Page Closed Warning ⚠️"));
-        console.warn(`${SEPARATOR}`);
-        console.warn(wrapTextInBox(`Page was closed before context could be captured for AI analysis. Test: ${testInfo.title}`));
-        console.warn(`${BOTTOM_BORDER}`);
-        // Log warning but don't modify error stack
-        try {
-          await testInfo.attach('ai-analysis-skipped.txt', {
-            body: 'Page was closed before context could be captured for AI analysis.',
-            contentType: 'text/plain',
-          });
-        } catch (e) {
-          console.error('Could not attach warning details.');
+      } else {
+        // Log if test passed or page was closed
+        if (testInfo.status !== 'failed' && testInfo.status !== 'timedOut') {
+          // console.log(`Test "${testInfo.title}" passed. Skipping AI analysis.`);
+        } else if (page.isClosed()) {
+          console.warn(`⚠️ Page was closed for test "${testInfo.title}". Cannot capture context for AI analysis.`);
+        } else if (!testInfo.error) {
+          console.warn(`⚠️ No error object found for failed test "${testInfo.title}". Cannot perform AI analysis.`);
         }
-      } else if (!testInfo.error) {
-        // --- Log No Error Object Warning --- (Same as before)
-        console.warn(`\n${TOP_BORDER}`);
-        console.warn(createCenteredHeader("⚠️ No Error Info Warning ⚠️"));
-        console.warn(`${SEPARATOR}`);
-        console.warn(wrapTextInBox(`Test status is '${testInfo.status}' but no error object was found. Cannot perform AI analysis. Test: ${testInfo.title}`));
-        console.warn(`${BOTTOM_BORDER}`);
       }
     }
   }
 });
 
-// Re-export expect
-export { expect } from '@playwright/test';
+export { expect }; // Re-export expect

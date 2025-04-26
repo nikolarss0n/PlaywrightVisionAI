@@ -11,7 +11,7 @@ Playwright Vision AI Debugger captures screenshots, HTML, and error details when
 - **Visual Element Detection**: Identifies UI elements in screenshots
 - **Smart Selector Recommendations**: Suggests better selectors following Playwright best practices
 - **Root Cause Analysis**: Explains why your tests failed in plain language
-- **Network Request Analysis**: Examines API calls and XHR requests to identify backend issues
+- **Comprehensive Network Analysis**: Captures and analyzes all network requests including API calls, XHR, fetch requests, headers, request/response bodies, and more
 - **Beautiful Glass UI Reports**: Generates elegant HTML reports with detailed analysis
 - **Token Optimization**: Cleans HTML to reduce token usage and minimize API costs
 - **Test Code Context**: Includes the failing test code for better debugging context
@@ -84,23 +84,47 @@ If you're working on this package locally or want to use it before publishing to
 ```typescript
 // tests/base.ts
 import { test as baseTest } from '@playwright/test';
-import { runAiDebuggingAnalysis } from 'playwright-vision-ai-debugger';
+import { setupAiDebugging } from 'playwright-vision-ai-debugger';
 import dotenv from 'dotenv';
 
 // Load environment variables
 dotenv.config();
 
-// Extend base test with AI debugging
-export const test = baseTest.extend({
-  // Your custom fixtures here
-});
+// Option 1: Simple setup - use the built-in setupAiDebugging function
+export const test = baseTest;
+setupAiDebugging(test);
+export { expect } from '@playwright/test';
 
-// Add a global hook for failed tests
-test.afterEach(async ({ page }, testInfo) => {
-  if (testInfo.status === 'failed' && testInfo.error) {
-    await runAiDebuggingAnalysis(page, testInfo, testInfo.error);
+// Option 2: Advanced setup with custom configuration
+/*
+// Extend base test with tracing for better debugging
+export const test = baseTest.extend({
+  // Enable tracing for all tests
+  context: async ({ context }, use, testInfo) => {
+    // Start tracing before using the context
+    await context.tracing.start({
+      screenshots: true,
+      snapshots: true, 
+      sources: true
+    });
+    
+    await use(context);
+    
+    // After the test runs, stop tracing and save to a file if test failed
+    if (testInfo.status !== 'passed') {
+      await context.tracing.stop({
+        path: testInfo.outputPath('trace.zip')
+      });
+    } else {
+      await context.tracing.stop();
+    }
   }
 });
+
+// Set up AI debugging with the configured test
+setupAiDebugging(test);
+export { expect } from '@playwright/test';
+*/
 ```
 
 ## Usage
@@ -138,6 +162,10 @@ After running your tests:
 3. Find the "ai-debug-analysis.html" attachment
 4. Click to view the AI analysis report
 
+You can also find report files in two locations:
+- **Terminal-style reports**: `debug-html-reports/ai-debug-analysis-[timestamp].html`
+- **Classic reports**: `test-output/ai-debug-analysis.html`
+
 The AI analysis includes:
 - Screenshot analysis with element identification
 - Better locator suggestions
@@ -149,9 +177,15 @@ The AI analysis includes:
 
 When a test fails, you'll see detailed AI analysis in your test report:
 
-![full_latest](https://github.com/user-attachments/assets/a1da4119-5631-46d4-8d15-d279f0ed3e04)
+### Terminal-Style Report
+Our new terminal-inspired interface design makes debugging more intuitive:
 
-![image](https://github.com/user-attachments/assets/94daecc2-da56-4078-a537-49078f9663d6)
+![terminal_style_report](https://github.com/user-attachments/assets/a1da4119-5631-46d4-8d15-d279f0ed3e04)
+
+### Classic Glass Effect UI
+The original glass-effect design is still available:
+
+![classic_glass_ui](https://github.com/user-attachments/assets/94daecc2-da56-4078-a537-49078f9663d6)
 
 ## API Reference
 
