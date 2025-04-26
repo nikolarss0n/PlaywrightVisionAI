@@ -394,6 +394,44 @@ export function generateHtmlReport({
             line-height: 1.6;
         }
         
+        /* Enhanced bullet points and list styling for AI analysis */
+        .ai-content-area ul {
+            padding-left: 1.5rem;
+            margin: 0.8rem 0 1.2rem;
+        }
+        
+        .ai-content-area ul li {
+            margin-bottom: 0.6rem;
+            position: relative;
+            padding-left: 0.5rem;
+            list-style-type: none;
+        }
+        
+        .ai-content-area ul li::before {
+            content: "✦";
+            color: var(--claude-green);
+            position: absolute;
+            left: -1.2rem;
+            font-weight: bold;
+        }
+        
+        /* Improved section separation */
+        .ai-content-area hr {
+            border: none;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--claude-purple) 50%, transparent);
+            margin: 1.5rem 0;
+        }
+        
+        /* Enhanced heading styling */
+        .ai-content-area h3 {
+            border-bottom: 1px solid var(--claude-purple);
+            padding-bottom: 0.5rem;
+            margin-top: 1.5rem;
+            color: var(--claude-orange);
+        }
+        
+        /* Code block highlighting */
         .ai-content-area code { 
             background-color: rgba(28, 30, 31, 0.7); 
             padding: 2px 4px; 
@@ -405,7 +443,6 @@ export function generateHtmlReport({
         
         .ai-content-area pre { 
             background-color: rgba(28, 30, 31, 0.7);
-            border-left: 3px solid var(--claude-purple);
             box-shadow: 0 3px 6px rgba(0, 0, 0, 0.2);
         }
         
@@ -484,6 +521,11 @@ export function generateHtmlReport({
             display: block;
         }
 
+        .view-btn {
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+
         .badge {
             font-size: 0.65rem;
             padding: 0.1rem 0.4rem;
@@ -514,13 +556,22 @@ export function generateHtmlReport({
             font-family: 'JetBrains Mono', monospace;
         }
 
+        code {
+            border-radius: 4px;
+        }
+
+        /* Override highlight.js backgrounds while preserving syntax highlighting */
+        .hljs {
+            background: transparent !important; /* Remove hljs background */
+        }
+
         pre {
             background-color: rgba(28, 30, 31, 0.7);
             border-radius: 6px;
             padding: 0.75rem;
             margin: 0.75rem 0;
             overflow-x: auto;
-            border-left: 3px solid var(--claude-purple);
+            border: 1px solid var(--claude-purple);
             box-shadow: 0 3px 6px rgba(0, 0, 0, 0.2);
         }
 
@@ -580,9 +631,6 @@ export function generateHtmlReport({
 
         /* Card styling */
         .card {
-            border: 1px solid var(--terminal-border);
-            border-radius: 6px;
-            background-color: rgba(28, 30, 31, 0.5);
             margin-bottom: 1rem;
             overflow: hidden;
         }
@@ -597,7 +645,7 @@ export function generateHtmlReport({
         }
 
         .card-title {
-            color: var(--heading-color);
+            color: var(--claude-orange);
             font-size: 0.9rem;
             margin: 0;
             font-weight: 500;
@@ -641,7 +689,6 @@ export function generateHtmlReport({
         }
     </style>
 </head>`;
-
   // Body start with blur background and terminal section
   const bodyStart = `
 <body>
@@ -665,7 +712,6 @@ export function generateHtmlReport({
   const overviewTab = `
                     <!-- Test Overview Tab -->
                     <div class="tab-content active" id="overview-tab">
-                        <h2>Test Run Details</h2>
                         <div class="card mt-4">
                             <div class="card-header">
                                 <h3 class="card-title">Test Information</h3>
@@ -699,22 +745,12 @@ export function generateHtmlReport({
                                 <pre><code class="language-javascript">${escapeHtml(testCode)}</code></pre>
                             </div>
                         </div>` : ''}
-                        
-                        <div class="card mt-4">
-                            <div class="card-header">
-                                <h3 class="card-title">Suggested Solution</h3>
-                            </div>
-                            <div class="card-body">
-                                <p class="thinking">Check the AI Analysis tab for a detailed solution to this issue.</p>
-                            </div>
-                        </div>
                     </div>`;
 
   // Error Details Tab
   const errorTab = `
                     <!-- Error Details Tab -->
                     <div class="tab-content" id="error-tab">
-                        <h2>Failure Details</h2>
                         <div class="card mt-4">
                             <div class="card-header">
                                 <h3 class="card-title">Error Information</h3>
@@ -738,7 +774,6 @@ export function generateHtmlReport({
   const aiAnalysisTab = `
                     <!-- AI Analysis Tab -->
                     <div class="tab-content" id="ai-tab">
-                        <h2>AI Debugging Analysis</h2>
                         <div class="mb-4">
                             <input type="text" id="aiSearchInput" placeholder="Search AI analysis..." 
                                 onkeyup="searchAiContent()">
@@ -806,7 +841,7 @@ export function generateHtmlReport({
                                         <td class="${statusClass}">${req.status || 0}</td>
                                         <td class="font-mono text-xs">${escapeHtml(req.responseHeaders?.['content-type'] || '')}</td>
                                         <td>
-                                            <button onclick="toggleDetails('request-${index}')">View</button>
+                                            <button class="view-btn" onclick="toggleDetails('request-${index}')">View</button>
                                         </td>
                                     </tr>
                                     <tr id="request-${index}" class="hidden">
@@ -895,7 +930,6 @@ export function generateHtmlReport({
   const usageTab = `
                     <!-- Usage Info Tab -->
                     <div class="tab-content" id="usage-tab">
-                        <h2>AI Usage Information</h2>
                         <div class="card">
                             <div class="card-header">
                                 <h3 class="card-title">AI Model Details</h3>
