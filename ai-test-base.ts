@@ -31,12 +31,7 @@ const testBase = base.extend({
     if (testInfo.status === 'failed' && testInfo.error) {
       const capture = testNetworkCaptures.get(testInfo.testId);
       if (capture) {
-        try {
           await runAiDebuggingAnalysis(page, testInfo, testInfo.error, capture.networkRequests);
-        } catch (e) {
-          console.error('Error in AI debugging:', e);
-        }
-        // Clean up
         capture.teardown();
       }
     }

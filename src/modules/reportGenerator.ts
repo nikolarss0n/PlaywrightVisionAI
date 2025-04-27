@@ -663,7 +663,7 @@ export function generateHtmlReport({
             background-color: rgba(37, 39, 40, 0.8);
             border-radius: 7px;
             padding: 0.75rem 1rem;
-            border-bottom: 1px solid var(--claude-orange);
+            border: 1px solid var(--claude-orange);
             display: flex;
             align-items: center;
             justify-content: space-between;
