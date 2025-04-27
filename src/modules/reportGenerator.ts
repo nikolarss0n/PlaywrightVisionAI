@@ -111,7 +111,8 @@ export function generateHtmlReport({
   stackTrace,
   networkRequests,
   aiAnalysisHtml,
-  usageInfoHtml
+  usageInfoHtml,
+  screenshotBase64
 }: {
   testInfo: TestInfo;
   failingSelector?: string | null;
@@ -121,6 +122,7 @@ export function generateHtmlReport({
   networkRequests: NetworkRequest[];
   aiAnalysisHtml: string;
   usageInfoHtml: string;
+  screenshotBase64?: string;
 }): string {
   const reportTitle = `Playwright Vision AI Debug Report: ${escapeHtml(testInfo.title)}`;
   
@@ -412,6 +414,119 @@ export function generateHtmlReport({
         .error-filter.active-filter {
             background-color: var(--error-color);
             color: white;
+        }
+
+        /* Screenshot thumbnail styling */
+        .screenshot-thumbnail {
+            max-width: 350px;
+            margin: 1rem 0;
+            border-radius: 6px;
+            border: 2px solid var(--terminal-border);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .screenshot-thumbnail:hover {
+            transform: scale(1.02);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+            border-color: var(--claude-purple);
+        }
+        
+        .screenshot-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            background-color: rgba(21, 23, 24, 0.95);
+            backdrop-filter: blur(5px);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            width: 90%;
+            max-width: 1200px;
+            max-height: 90%;
+            overflow: hidden;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 1px solid var(--terminal-border);
+        }
+        
+        .screenshot-modal-content {
+            display: block;
+            border-radius: 6px;
+            max-width: 100%;
+            max-height: 80vh;
+            object-fit: contain;
+            margin: 0 auto;
+        }
+        
+        .screenshot-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--terminal-border);
+        }
+        
+        .screenshot-modal-title {
+            color: var(--heading-color);
+            font-size: 0.9rem;
+            margin: 0;
+            font-weight: 500;
+        }
+        
+        .screenshot-close {
+            color: var(--text-color);
+            background-color: var(--code-bg);
+            border: 1px solid var(--terminal-border);
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .screenshot-close:hover,
+        .screenshot-close:focus {
+            background-color: var(--error-color);
+            color: white;
+            text-decoration: none;
+            border-color: var(--error-color);
+            cursor: pointer;
+        }
+
+        /* Screenshot in Failure Explanation section */
+        .failure-explanation-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: flex-start;
+            margin-top: 15px;
+        }
+        
+        .failure-screenshot {
+            flex: 0 0 300px;
+            max-width: 300px;
+            margin-bottom: 15px;
+            border-radius: 6px;
+            border: 2px solid var(--terminal-border);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .failure-screenshot:hover {
+            transform: scale(1.02);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+            border-color: var(--claude-purple);
+        }
+        
+        .failure-text {
+            flex: 1;
+            min-width: 250px;
         }
 
         /* AI content area */
@@ -811,6 +926,16 @@ export function generateHtmlReport({
                         <div id="aiContentContainer" class="ai-content-area">
                             ${aiAnalysisHtml}
                         </div>
+                        
+                        ${screenshotBase64 ? `
+                        <!-- Modal for fullscreen screenshot -->
+                        <div id="screenshotModal" class="screenshot-modal">
+                            <div class="screenshot-modal-header">
+                                <h4 class="screenshot-modal-title">Screenshot Preview</h4>
+                                <button class="screenshot-close" onclick="closeScreenshotModal()">Close</button>
+                            </div>
+                            <img class="screenshot-modal-content" src="data:image/png;base64,${screenshotBase64}" />
+                        </div>` : ''}
                     </div>`;
 
   // Network Requests Tab
@@ -1201,7 +1326,9 @@ export function generateHtmlReport({
             });
             
             // Reset search field
-            document.getElementById('aiSearchInput').value = '';
+            if (document.getElementById('aiSearchInput')) {
+                document.getElementById('aiSearchInput').value = '';
+            }
             
             // Show all sections first
             showAllAiSections();
@@ -1295,8 +1422,85 @@ export function generateHtmlReport({
             }
         }
 
+        // Screenshot modal functions
+        function openScreenshotModal() {
+            const modal = document.getElementById('screenshotModal');
+            if (modal) {
+                modal.style.display = 'block';
+            }
+        }
+        
+        function closeScreenshotModal() {
+            const modal = document.getElementById('screenshotModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+        
+        // Close modal if clicking outside the image
+        window.onclick = function(event) {
+            const modal = document.getElementById('screenshotModal');
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        }
+
         // Initialize highlightjs after DOM is loaded
         document.addEventListener('DOMContentLoaded', function() {
+            // Set up direct click handlers for screenshots
+            document.querySelectorAll('.failure-screenshot, .screenshot-thumbnail').forEach(thumbnail => {
+                thumbnail.addEventListener('click', function(e) {
+                    const modal = document.getElementById('screenshotModal');
+                    if (modal) {
+                        // Position the modal near the click position
+                        const x = e.pageX;
+                        const y = e.pageY;
+                        
+                        // Set max sizes to avoid modal going out of viewport
+                        const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+                        const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+                        
+                        // Calculate position, ensuring the modal stays within viewport
+                        let modalLeft = x - 20;
+                        let modalTop = y - 20;
+                        
+                        // Get modal dimensions (after temporarily making it visible offscreen)
+                        modal.style.display = 'block';
+                        modal.style.top = '-9999px';
+                        modal.style.left = '-9999px';
+                        const modalWidth = modal.offsetWidth;
+                        const modalHeight = modal.offsetHeight;
+                        
+                        // Adjust if the modal would go outside viewport
+                        if (modalLeft + modalWidth > viewportWidth) {
+                            modalLeft = viewportWidth - modalWidth - 20;
+                        }
+                        if (modalTop + modalHeight > viewportHeight) {
+                            modalTop = viewportHeight - modalHeight - 20;
+                        }
+                        
+                        // Ensure we don't go off the left or top edges
+                        modalLeft = Math.max(20, modalLeft);
+                        modalTop = Math.max(20, modalTop);
+                        
+                        // Position and show the modal
+                        modal.style.left = modalLeft + 'px';
+                        modal.style.top = modalTop + 'px';
+                    }
+                });
+            });
+            
+            // Also make sure the close button works
+            const closeButton = document.querySelector('.screenshot-close');
+            if (closeButton) {
+                closeButton.addEventListener('click', function() {
+                    const modal = document.getElementById('screenshotModal');
+                    if (modal) {
+                        modal.style.display = 'none';
+                    }
+                });
+            }
+
             document.querySelectorAll('pre code').forEach((block) => {
                 hljs.highlightElement(block);
             });
@@ -1321,6 +1525,63 @@ export function generateHtmlReport({
                     h3.parentNode.insertBefore(headerDiv, h3);
                     h3.remove();
                 });
+                
+                // Find the Failure Explanation heading and insert screenshot
+                ${screenshotBase64 ? `
+                // Find the failure explanation section
+                const failureHeading = Array.from(aiContainer.querySelectorAll('.card-title')).find(
+                    heading => heading.textContent && heading.textContent.toLowerCase().includes('failure explanation')
+                );
+                
+                if (failureHeading) {
+                    // Get the parent card header
+                    const cardHeader = failureHeading.closest('.card-header');
+                    
+                    if (cardHeader) {
+                        // Get all content elements following this header until the next header
+                        const contentContainer = document.createElement('div');
+                        contentContainer.className = 'failure-explanation-container';
+                        
+                        // Create screenshot element
+                        const screenshot = document.createElement('img');
+                        screenshot.className = 'failure-screenshot';
+                        screenshot.src = 'data:image/png;base64,${screenshotBase64}';
+                        screenshot.alt = 'Error Screenshot';
+                        screenshot.onclick = function() { openScreenshotModal(); };
+                        
+                        // Create the text container for the explanation
+                        const textContainer = document.createElement('div');
+                        textContainer.className = 'failure-text';
+                        
+                        // Find all elements after the card header until the next card header or hr
+                        let currentElement = cardHeader.nextElementSibling;
+                        const collectedElements = [];
+                        
+                        while (currentElement && 
+                               !currentElement.matches('hr, .card-header')) {
+                            collectedElements.push(currentElement);
+                            const nextElement = currentElement.nextElementSibling;
+                            currentElement.remove();
+                            currentElement = nextElement;
+                        }
+                        
+                        // Append all collected elements to the text container
+                        collectedElements.forEach(el => {
+                            textContainer.appendChild(el);
+                        });
+                        
+                        // Add screenshot and text container to the content container
+                        contentContainer.appendChild(screenshot);
+                        contentContainer.appendChild(textContainer);
+                        
+                        // Insert the content container after the header
+                        if (currentElement) {
+                            cardHeader.parentNode.insertBefore(contentContainer, currentElement);
+                        } else {
+                            cardHeader.parentNode.appendChild(contentContainer);
+                        }
+                    }
+                }` : ''}
             }
         });
     </script>

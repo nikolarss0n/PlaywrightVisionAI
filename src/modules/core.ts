@@ -158,7 +158,8 @@ export async function runAiDebuggingAnalysis(
       stackTrace,
       networkRequests,
       aiAnalysisHtml,
-      usageInfoHtml
+      usageInfoHtml,
+      screenshotBase64
     });
     
     // Save and attach the report
