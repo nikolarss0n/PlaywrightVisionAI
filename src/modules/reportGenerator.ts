@@ -57,7 +57,7 @@ export async function saveAndAttachReport(
 ): Promise<void> {
   try {
     // Create a folder for AI debug reports if it doesn't exist
-    const reportFolder = path.join(process.cwd(), 'zzz');
+    const reportFolder = path.join(process.cwd(), 'ai-analysis');
     if (!fs.existsSync(reportFolder)) {
       fs.mkdirSync(reportFolder, { recursive: true });
     }
