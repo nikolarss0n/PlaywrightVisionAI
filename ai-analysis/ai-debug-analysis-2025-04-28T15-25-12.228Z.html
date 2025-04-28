@@ -1,0 +1,1435 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Playwright Vision AI Debug Report: should correctly display API data from JSONPlaceholder</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('pre code').forEach((block) => {
+                hljs.highlightElement(block);
+            });
+        });
+    </script>
+    <style>
+        /* Reset box model for consistent layout */
+        * {
+            box-sizing: border-box;
+        }
+
+        /* --- Terminal-like styling --- */
+        :root {
+            --bg-color: #151718;
+            --text-color: #d9d9d9;
+            --heading-color: #ffffff;
+            --prompt-char-color: #5fb3b3;
+            --terminal-border: #303436;
+            --code-bg: #1c1e1f;
+            --accent-color: #7b9db4;
+            --success-color: #99c794;
+            --error-color: #ec5f67;
+            --warn-color: #fac863;
+            --purple-color: #c594c5;
+            --link-color: #6699cc;
+            --dim-color: #65737e;
+            --selection-bg: #3e4451;
+            --selection-text: #dfe1e8;
+            --claude-purple: #8a56ac;
+            --claude-orange: #ff9500;
+            --claude-green: #28a745;
+            --tab-hover: rgba(32, 34, 35, 0.8);
+            --tab-active: rgba(27, 29, 30, 0.8);
+        }
+        
+        /* Blurred background image */
+        .bg-blur {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background-image: linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.4)), url('https://preview.redd.it/macos-sonoma-wallpapers-5120x2160-v0-j9vwvbq8h5wb1.jpg?width=5120&format=pjpg&auto=webp&s=943e6f75b62ea11c987d13b3ba7091abecd48ab6');
+            background-size: cover, cover;
+            background-position: center center, center center;
+            background-attachment: fixed;
+            filter: blur(8px);
+            -webkit-filter: blur(8px);
+            transform: scale(1.05);
+        }
+
+        /* Basic styles */
+        html, body {
+            color: var(--text-color);
+            font-family: 'JetBrains Mono', monospace;
+            line-height: 1.5;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+
+        /* Terminal container */
+        main {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Terminal section */
+        .terminal-section {
+            background-color: rgba(21, 23, 24, 0.85);
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+            margin-bottom: 2rem;
+            overflow: hidden;
+            border: 1px solid var(--terminal-border);
+        }
+
+        /* Terminal header */
+        .terminal-header {
+            background-color: rgba(28, 30, 31, 0.9);
+            padding: 0.75rem 1rem;
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid var(--terminal-border);
+        }
+
+        .terminal-title {
+            color: var(--heading-color);
+            font-size: 1rem;
+            margin: 0;
+            flex-grow: 1;
+            position: relative;
+            padding-left: 1.5rem;
+        }
+
+        .terminal-title::before {
+            content: '●';
+            position: absolute;
+            left: 0;
+            color: var(--claude-purple);
+            font-size: 0.8em;
+        }
+
+        /* Terminal body */
+        .terminal-body {
+            padding: 1rem;
+            overflow-x: auto;
+        }
+
+        /* Headings */
+        h2, h3 {
+            color: var(--heading-color);
+            font-weight: 600;
+            margin-top: 0;
+            margin-bottom: 1rem;
+            position: relative;
+            padding-left: 1.25rem;
+            letter-spacing: 0.01em;
+        }
+
+        h2::before, h3::before {
+            content: '▶';
+            position: absolute;
+            left: 0;
+            color: var(--claude-blue);
+            font-size: 0.8em;
+        }
+
+        /* Method colors for network requests */
+        .method-get { color: var(--link-color); }
+        .method-post { color: var(--success-color); }
+        .method-put { color: var(--warn-color); }
+        .method-delete { color: var(--error-color); }
+        .method-options { color: var(--purple-color); }
+        
+        /* Status colors */
+        .status-success { color: var(--success-color); }
+        .status-redirect { color: var(--warn-color); }
+        .status-error { color: var(--error-color); }
+
+        /* Link styles */
+        a {
+            color: var(--link-color);
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+
+        a:hover {
+            text-decoration: underline;
+            opacity: 0.9;
+        }
+
+        /* List styles */
+        ul, ol {
+            padding-left: 1.5rem;
+            margin: 0.5rem 0 1rem;
+        }
+
+        li {
+            margin-bottom: 0.25rem;
+        }
+
+        /* Table styles */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            font-size: 0.9rem;
+        }
+
+        thead {
+            background-color: rgba(28, 30, 31, 0.8);
+            color: var(--heading-color);
+        }
+
+        th, td {
+            padding: 0.5rem 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid var(--terminal-border);
+        }
+
+        tr:hover {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        /* Button styling */
+        button {
+            background-color: var(--code-bg);
+            color: var(--accent-color);
+            border: 1px solid var(--terminal-border);
+            border-radius: 4px;
+            padding: 0.25rem 0.5rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        button:hover {
+            background-color: var(--accent-color);
+            color: var(--bg-color);
+        }
+
+        /* Utility classes */
+        .hidden { display: none; }
+        .mt-4 { margin-top: 1rem; }
+        .mb-4 { margin-bottom: 1rem; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .overflow-x-auto { overflow-x: auto; }
+        .text-xs { font-size: 0.75rem; }
+        .text-sm { font-size: 0.875rem; }
+        .text-purple { color: var(--purple-color); }
+        .text-dim { color: var(--dim-color); }
+        .text-success { color: var(--success-color); }
+        .text-error { color: var(--error-color); }
+        .text-warn { color: var(--warn-color); }
+        .text-link { color: var(--link-color); }
+
+        /* Input style */
+        input[type="text"] {
+            background-color: rgba(28, 30, 31, 0.7);
+            color: var(--text-color);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.875rem;
+            padding: 0.5rem;
+            border: 1px solid var(--terminal-border);
+            border-radius: 4px;
+            width: 100%;
+            margin-bottom: 0.5rem;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--claude-purple);
+            box-shadow: 0 0 0 2px rgba(138, 86, 172, 0.3);
+        }
+
+        /* Filter button styles */
+        .filter-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .filter-btn {
+            padding: 4px 8px;
+            border-radius: 4px;
+            background-color: rgba(40, 42, 44, 0.8);
+            color: var(--text-color);
+            border: 1px solid var(--terminal-border);
+            font-size: 0.8rem;
+            transition: all 0.2s ease;
+        }
+
+        .filter-btn:hover {
+            background-color: rgba(60, 62, 64, 0.8);
+        }
+
+        .filter-btn.active-filter {
+            background-color: var(--claude-purple);
+            color: white;
+        }
+
+        .error-filter.active-filter {
+            background-color: var(--error-color);
+            color: white;
+        }
+
+        /* Screenshot thumbnail styling */
+        .screenshot-thumbnail {
+            max-width: 350px;
+            margin: 1rem 0;
+            border-radius: 6px;
+            border: 2px solid var(--terminal-border);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .screenshot-thumbnail:hover {
+            transform: scale(1.02);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+            border-color: var(--claude-purple);
+        }
+        
+        .screenshot-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            background-color: rgba(21, 23, 24, 0.95);
+            backdrop-filter: blur(5px);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            width: 90%;
+            max-width: 1200px;
+            max-height: 90%;
+            overflow: hidden;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 1px solid var(--terminal-border);
+        }
+        
+        .screenshot-modal-content {
+            display: block;
+            border-radius: 6px;
+            max-width: 100%;
+            max-height: 80vh;
+            object-fit: contain;
+            margin: 0 auto;
+        }
+        
+        .screenshot-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--terminal-border);
+        }
+        
+        .screenshot-modal-title {
+            color: var(--heading-color);
+            font-size: 0.9rem;
+            margin: 0;
+            font-weight: 500;
+        }
+        
+        .screenshot-close {
+            color: var(--text-color);
+            background-color: var(--code-bg);
+            border: 1px solid var(--terminal-border);
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .screenshot-close:hover,
+        .screenshot-close:focus {
+            background-color: var(--error-color);
+            color: white;
+            text-decoration: none;
+            border-color: var(--error-color);
+            cursor: pointer;
+        }
+
+        /* Screenshot in Failure Explanation section */
+        .failure-explanation-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: flex-start;
+            margin-top: 15px;
+        }
+        
+        .failure-screenshot {
+            flex: 0 0 300px;
+            max-width: 300px;
+            margin-bottom: 15px;
+            border-radius: 6px;
+            border: 2px solid var(--terminal-border);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .failure-screenshot:hover {
+            transform: scale(1.02);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+            border-color: var(--claude-purple);
+        }
+        
+        .failure-text {
+            flex: 1;
+            min-width: 250px;
+        }
+
+        /* AI content area */
+        .ai-content-area p { 
+            margin-bottom: 0.75rem;
+            margin-top: 0.5rem;
+            line-height: 1.6;
+        }
+        
+        /* Enhanced bullet points and list styling for AI analysis */
+        .ai-content-area ul {
+            padding-left: 1.5rem;
+            margin: 0.8rem 0 1.2rem;
+        }
+        
+        .ai-content-area ul li {
+            margin-bottom: 0.6rem;
+            position: relative;
+            padding-left: 0.5rem;
+            list-style-type: none;
+        }
+        
+        .ai-content-area ul li::before {
+            content: "✦";
+            color: var(--claude-green);
+            position: absolute;
+            left: -1.2rem;
+            font-weight: bold;
+        }
+        
+        /* Improved section separation */
+        .ai-content-area hr {
+            border: none;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--claude-purple) 50%, transparent);
+            margin: 1rem 0px 2rem
+        }
+        
+        /* Enhanced heading styling */
+        .ai-content-area h3 {
+            color: var(--claude-orange);
+        }
+        
+        /* Code block highlighting */
+        .ai-content-area code { 
+            background-color: rgba(28, 30, 31, 0.7); 
+            padding: 2px 4px; 
+            border-radius: 3px; 
+            font-size: 0.9em; 
+            color: var(--claude-blue);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .ai-content-area pre { 
+            background-color: rgba(28, 30, 31, 0.7);
+            box-shadow: 0 3px 6px rgba(0, 0, 0, 0.2);
+        }
+        
+        .ai-content-area pre code { 
+            background: none; 
+            padding: 0; 
+            border: none;
+        }
+        
+        .ai-highlight {
+            background-color: rgba(138, 86, 172, 0.3);
+            border-radius: 2px;
+            padding: 0 2px;
+        }
+
+        /* Tabs styling */
+        .tabs-container {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+        }
+
+        .tab-buttons {
+            overflow-x: auto;
+            border-bottom: 1px solid var(--terminal-border);
+            padding-left: 1rem;
+            padding-right: 1rem;
+            padding-bottom: 0.5rem;
+        }
+
+        .tab-button {
+            padding: 0.75rem 1.25rem;
+            background-color: transparent;
+            color: var(--dim-color);
+            border: none;
+            border-bottom: 2px solid transparent;
+            border-radius: 7px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .tab-button:hover {
+            color: var(--heading-color);
+            background-color: var(--tab-hover);
+            border-radius: 7px;
+        }
+
+        .tab-button.active {
+            color: var(--heading-color);
+            border-bottom: 2px solid var(--claude-purple);
+            background-color: var(--tab-active);
+        }
+
+        .tab-button.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background-color: var(--claude-purple);
+        }
+
+        .tab-button:focus {
+            outline: none;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 1rem;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .view-btn {
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+
+        .badge {
+            font-size: 0.65rem;
+            padding: 0.1rem 0.4rem;
+            border-radius: 10px;
+            margin-left: 0.5rem;
+            display: inline-block;
+            vertical-align: middle;
+            text-align: center;
+        }
+
+        .badge-error {
+            background-color: var(--error-color);
+            color: white;
+        }
+
+        .badge-warning {
+            background-color: var(--warn-color);
+            color: var(--bg-color);
+        }
+
+        .badge-info {
+            background-color: var(--link-color);
+            color: white;
+        }
+
+        /* Code styling */
+        code, pre {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        code {
+            border-radius: 4px;
+        }
+
+        /* Override highlight.js backgrounds while preserving syntax highlighting */
+        .hljs {
+            background: transparent !important; /* Remove hljs background */
+        }
+
+        pre {
+            background-color: rgba(28, 30, 31, 0.7);
+            border-radius: 6px;
+            padding: 0.75rem;
+            margin: 0.75rem 0;
+            overflow-x: auto;
+            border: 1px solid var(--claude-purple);
+            box-shadow: 0 3px 6px rgba(0, 0, 0, 0.2);
+        }
+
+        code.error-block-code {
+            display: block;
+            background-color: rgba(236, 95, 103, 0.1);
+            color: var(--error-color);
+            padding: 0.75rem;
+            border-radius: 4px;
+            border-left: 2px solid var(--error-color);
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        /* Command styling (Claude Code specific) */
+        .command-input::before {
+            content: "$ ";
+            color: var(--claude-green);
+            font-weight: bold;
+        }
+
+        /* Claude Code thinking style */
+        .thinking {
+            color: var(--claude-orange);
+            font-style: italic;
+        }
+
+        /* Sub tabs for filtering AI content */
+        .ai-filter-tabs {
+            display: flex;
+            overflow-x: auto;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--terminal-border);
+            padding-bottom: 0.5rem;
+        }
+
+        .ai-filter-btn {
+            padding: 4px 12px;
+            margin-right: 4px;
+            border-radius: 7px;
+            background-color: rgba(40, 42, 44, 0.8);
+            color: var(--text-color);
+            border: 1px solid var(--terminal-border);
+            border-bottom: none;
+            font-size: 0.8rem;
+            transition: all 0.2s ease;
+        }
+
+        .ai-filter-btn:hover {
+            background-color: rgba(60, 62, 64, 0.8);
+        }
+
+        .ai-filter-btn.active-filter {
+            background-color: var(--claude-purple);
+            color: white;
+        }
+
+        /* Card styling */
+        .card {
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+
+        .card-header {
+            background-color: rgba(37, 39, 40, 0.8);
+            border-radius: 7px;
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--claude-orange);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .card-title {
+            color: var(--claude-orange);
+            font-size: 0.9rem;
+            margin: 0;
+            font-weight: 500;
+        }
+
+        .card-body {
+            padding: 1rem;
+        }
+
+        /* Dividers */
+        .divider {
+            height: 1px;
+            width: 100%;
+            background-color: var(--terminal-border);
+            margin: 1rem 0;
+        }
+
+        /* Mobile responsive - adjust layout for small screens */
+        @media (max-width: 640px) {
+            .tab-buttons {
+                flex-wrap: wrap;
+            }
+
+            .tab-button {
+                border-radius: 7px;
+                flex: 1 1 auto;
+                padding: 0.5rem;
+                font-size: 0.75rem;
+                text-align: center;
+            }
+
+            .filter-buttons {
+                flex-wrap: wrap;
+            }
+
+            .filter-btn {
+                flex: 1 1 auto;
+                text-align: center;
+                font-size: 0.7rem;
+                padding: 3px 6px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-blur"></div>
+    <main>
+        <section class="terminal-section">
+            <div class="terminal-header">
+                <h2 class="terminal-title">Playwright Vision AI Debugger</h2>
+            </div>
+            <div class="terminal-body">
+                <div class="tabs-container">
+                    <div class="tab-buttons">
+                        <button class="tab-button active" data-tab="overview">Test Overview</button>
+                        <button class="tab-button" data-tab="error">Error Details <span class="badge badge-error">1</span></button>
+                        <button class="tab-button" data-tab="ai">AI Analysis</button>
+                        <button class="tab-button" data-tab="network">Network Requests <span class="badge badge-info">1</span></button>
+                        <button class="tab-button" data-tab="usage">Usage Info</button>
+                    </div>
+                    <!-- Test Overview Tab -->
+                    <div class="tab-content active" id="overview-tab">
+                        <div class="card mt-4">
+                            <div class="card-header">
+                                <h3 class="card-title">Test Information</h3>
+                            </div>
+                            <div class="card-body">
+                                <p><strong>Test:</strong> should correctly display API data from JSONPlaceholder</p>
+                                <p><strong>File:</strong> examples/basic-test-example/my-feature.spec.ts</p>
+                                <p><strong>Browser:</strong> chromium</p>
+                                <p><strong>Status:</strong> <span class="text-error">failed</span></p>
+                                <p><strong>Duration:</strong> 5281ms</p>
+                            </div>
+                        </div>
+
+                        
+
+                        
+                        <div class="card mt-4">
+                            <div class="card-header">
+                                <h3 class="card-title">Test Code</h3>
+                            </div>
+                            <div class="card-body">
+                                <pre><code class="language-javascript">import { test, expect } from &#039;./ai-test-base&#039;;
+
+// Test that would fail due to network request issues - the AI should be able to identify
+// that the failure is related to API data not matching expectations
+test(&#039;should correctly display API data from JSONPlaceholder&#039;, async ({ page }) =&gt; {
+  // Set up request interception for API calls to JSONPlaceholder
+  await page.route(&#039;**/posts/**&#039;, async route =&gt; {
+    // Modify the response to simulate an API issue
+    const json = {
+      id: 1,
+      title: &quot;Modified API Response&quot;,
+      body: &quot;This is a modified response that will cause the test to fail&quot;,
+      userId: 999 // Modified userId that won&#039;t match expectations
+    };
+    
+    await route.fulfill({
+      status: 200,
+      contentType: &#039;application/json&#039;,
+      body: JSON.stringify(json)
+    });
+    
+    console.log(&#039;Intercepted and modified API response&#039;);
+  });
+
+  // Navigate to JSONPlaceholder demo site
+  await page.goto(&#039;https://jsonplaceholder.typicode.com/posts/1&#039;);
+  
+  // Wait for API data to load
+  await page.waitForSelector(&#039;pre&#039;);
+  
+  // The test should fail here because we&#039;ve modified the API response
+  // and the userId no longer matches what we expect
+  try {
+    await expect(page.getByText(&#039;&quot;userId&quot;: 1&#039;)).toBeVisible({
+      timeout: 5000
+    });
+  } catch (error) {
+    // Throw a custom error message that will be captured by the AI debugger
+    throw new Error(&#039;Expected to find userId: 1 in the response, but it was modified by our API interceptor&#039;);
+  }
+});</code></pre>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Error Details Tab -->
+                    <div class="tab-content" id="error-tab">
+                        <div class="card mt-4">
+                            <div class="card-header">
+                                <h3 class="card-title">Error Information</h3>
+                            </div>
+                            <div class="card-body">
+                                <p><strong class="text-error">Error Message:</strong></p>
+                                <code class="error-block-code">Error: Expected to find userId: 1 in the response, but it was modified by our API interceptor</code>
+                                
+                                
+                                <div class="mt-4">
+                                    <details>
+                                        <summary>Show Stack Trace</summary>
+                                        <pre><code class="language-javascript">Error: Expected to find userId: 1 in the response, but it was modified by our API interceptor
+    at /mnt/c/Projects/PlaywrightVisionAI/examples/basic-test-example/my-feature.spec.ts:39:11</code></pre>
+                                    </details>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- AI Analysis Tab -->
+                    <div class="tab-content" id="ai-tab">
+                        <div class="mb-4">
+                            <div class="ai-filter-tabs">
+                                <button class="ai-filter-btn active-filter" data-filter="all" onclick="filterAiContent('all')">All</button>
+                                <button class="ai-filter-btn" data-filter="root-cause" onclick="filterAiContent('root-cause')">Root Cause</button>
+                                <button class="ai-filter-btn" data-filter="solution" onclick="filterAiContent('solution')">Solutions</button>
+                                <button class="ai-filter-btn" data-filter="debugging" onclick="filterAiContent('debugging')">Debugging Steps</button>
+                                <button class="ai-filter-btn" data-filter="code" onclick="filterAiContent('code')">Code Examples</button>
+                            </div>
+                        </div>
+                        <div id="aiContentContainer" class="ai-content-area">
+                            <p><strong>Configuration Error:</strong> GEMINI_API_KEY is not set. AI analysis cannot proceed.</p>
+
+                        </div>
+                        
+                        
+                        <!-- Modal for fullscreen screenshot -->
+                        <div id="screenshotModal" class="screenshot-modal">
+                            <div class="screenshot-modal-header">
+                                <h4 class="screenshot-modal-title">Screenshot Preview</h4>
+                                <button class="screenshot-close" onclick="closeScreenshotModal()">Close</button>
+                            </div>
+                            <img class="screenshot-modal-content" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABQAAAALQCAIAAABAH0oBAAAAAXNSR0IArs4c6QAAIABJREFUeJzs3T9sW3ee6O3jwQJiMQBZDVmFbMYiEMRioysVCURgspCABJAQLyDBKaz1LaxkCivbWMEWr7eSqpWaGam5tpqJVdysVExgAZuBBCSAhesBpPfNDqybKaR1I3ob0cAsyFR8C+qfJVKWHMWJ832exglFkYfn/M6fD8lzdKlarSYAAADwc/eLH3sCAAAA4FUQwAAAAITwdz/2BLweLl269Lvf/e5vf/vbX/7yl5M/ffPNN3/5y1/+9re/bTQaP8bUAQAA8GKXfs7nAD/7/OqVe+999ccbb3zfR/r973+fzWZv3LjR7g537959+vTpxx9//H2fCQAAgB/GL5Lk6d33s5mmbP7Kuzemv376so/29O77+aufPTt+c/2LD/Pvzn77vSf2vNJvfTT50du/Otudv/7kSvenj9r88L//+79Pqd8kSW7cuPG3v/3tZSYSAACAV2LvHOBfj/97pVqtfPvvk91/nfrwnz4/0bCvp8vvXnvvcuoCHug//uM/Xniflt+OBgAA4Cfi4CJYqVSSpNKX3/vo2lv1b/6892ntlx9f7v7ks88+ef+d7u4rV7o//uJZkiRJ/dvPP73afTmfzV9+58P9z4u//PSd7u6/n3r07Os773R3d3d3f/JFPUmSR9Pvd3e/88nXz76Z/ofu7u7u7hufPUmSJHn0afflG18cdPY3d97Jf3hKdj/7/Gq2+8NPPnz/3Xff6X7n6p0vDz+k/uZOd/7G3c8/vdqcxg+bj//N7NXu7iuXs9n37z5Jjtz3nfzVT6dvXH3/nStXuq/OPqonSZJ8e/fD7u7uj//tyZPP/md3d3d39/uz31zoTAYAAODHd+wiWM+++fyLv6Z+feSk2Sdf3P3m7h++ms4m9adPnnUkSf3rT//hn/76wR+++sPb2WdffvoPNz7OfvX5tey7k1+9O/n07vv/44trX31+Lb3/692f/PHRJ/UvPuycfvt/f/nR5YOH7b72Xvb9z7589t7VdJIkjz774ulv7rybTk7z129T019++Xa6/ujTv//wn9766g9Xs3s/qf/p3te//8O/T76RSp49edKRJEny1kefP/ro2edXr9w79ij1P3+b/erzP76RfDv97t//y2cf/PFG9vKNPzy6kXz9yZVPUv/r0WT395mdAAAA/FTtfQL819mrly9fvpy//P695IN/nb6WPbhDqvujibezSZIkqewb2VRS/9Pdf0s+mLjzdjaVJNl3P/rHy3/+/E8v8Y3pt65d+/XXn33xNEmS+tefffHdu9d+c3r/Jr9+79rb6SRJUt3XfpP9+t/+XD/yYP848d4bqSRJkvQbb7zgK89vX3vvjSRJksvdb6Wf/PXJ6XcGAADg52LvE+Bf37j7x4m3UklHOn2sH3/1xhvPhel/Pfmv+tOvP+n+eu//v/uu49f1Z0nygno96fIH196a+uyLJ9euPfn8Tx3v/a9395/42WdXL3/8p++SJHnjo3///w4+kU2ls/vPkc6m639++ixJ9n4l9as3sq2eopVUR+rIpNa/O+9kAwAA8Hra/wp0RzqbPlPD/upX6dTlj/7w1SeXz3DnU2Wv/uPbU7NffJN99EX6vc8Pv3mcvvb502sn717/rydPk+SNJEmSp0+eptJHJ/cirnMFAADAz9ovznCf56Te/cf3nt37l7uPniZJktSffvPlF4d/Nimd/VXy5Jtv6sd/J/2r9JNHfz3+Ren0e9fefnL346k/vfHBtbde/MxPPp/57Ek9qT/5fPaLZ29/8PYFV2/6jfR/ffvXl/4LUAAAAPy0nTuAk/S7//q//583vvind/L5fP7K+5/ce3TYu6nffDRx+esbVy4fXjI6SZIkefujibf/+mn35StXruxdpXnv7jfe++6bb9+6dvUMHyen3nr3119++D/yne9MPfvg9/969bQvPde/+Lj7ypUr73z69bNH//L+lStXum989qK0fevaxAfPpt65fOXKlfenj18F+s0333zhBJ7lPgAAAPxYLlWr1R/x6b+dfvfvv77xfz6/9oJzeJ99fvXK7LtfffnRG6ff74fy+9//PpvN3rhxo90d7t69+/Tp048//vjVThcAAABn9XdnuM8P5tmXM/ee/GbyvTNfwepH89vf/vZ3v/vdP//zP//lL385+dM333zzl7/85W9/+9tGo/FjTB0AAAAv9qMF8KM73f9w79mvP5i++965LyD96jUajRd+uqt+AQAAfsp+5K9AAwAAwKtx/otgAQAAwGvo7x49evRjTwMAAAD84C45cxUAAIAIfAUaAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQB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AAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAID/v/06EAAAAAAQ5G89yGURAAsCDAAAwIIAAwAAsCDAAAAALAgwAAAACwIMAADAggADAACwIMAAAAAsCDAAAAALAgwAAMCCAAMAALAgwAAAACwIMAAAAAsCDAAAwIIAAwAAsCDAAAAALAgwAAAACwIMAADAggADAACwIMAAAAAsCDAAAAALAgwAAMCCAAMAALAgwAAAACwIMAAAAAsB4ejo4j73eTkAAAAASUVORK5CYII=" />
+                        </div>
+                    </div>
+                    <!-- Network Requests Tab -->
+                    <div class="tab-content" id="network-tab">
+                        <div class="card-header">
+                            <h2 class="card-title">Network Requests</h2>
+                        </div>
+                        <div class="mb-4">
+                            <input type="text" id="networkSearch" placeholder="Search network requests..." 
+                                onkeyup="filterNetworkRequests()">
+                            <div class="filter-buttons">
+                                <button class="filter-btn active-filter" data-filter="all" onclick="filterByType('all')">All</button>
+                                <button class="filter-btn" data-filter="xhr" onclick="filterByType('xhr')">XHR</button>
+                                <button class="filter-btn" data-filter="fetch" onclick="filterByType('fetch')">Fetch</button>
+                                <button class="filter-btn" data-filter="document" onclick="filterByType('document')">Document</button>
+                                <button class="filter-btn" data-filter="stylesheet" onclick="filterByType('stylesheet')">CSS</button>
+                                <button class="filter-btn" data-filter="script" onclick="filterByType('script')">JS</button>
+                                <button class="filter-btn" data-filter="image" onclick="filterByType('image')">Images</button>
+                                <button class="filter-btn error-filter" onclick="filterByStatus('error')">Errors</button>
+                            </div>
+                        </div>
+                        
+                        <div class="overflow-x-auto">
+                            <table id="networkTable">
+                                <thead>
+                                    <tr>
+                                        <th>Method</th>
+                                        <th>Type</th>
+                                        <th>URL</th>
+                                        <th>Status</th>
+                                        <th>Content-Type</th>
+                                        <th>Details</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr class="network-row" data-type="document" data-url="https://jsonplaceholder.typicode.com/posts/1" data-status="200">
+                                        <td class="method-get">GET</td>
+                                        <td class="text-purple">document</td>
+                                        <td class="font-mono text-xs" style="max-width: 250px; word-break: break-all;">https://jsonplaceholder.typicode.com/posts/1</td>
+                                        <td class="status-success">200</td>
+                                        <td class="font-mono text-xs">application/json</td>
+                                        <td>
+                                            <button class="view-btn" onclick="toggleDetails('request-0')">View</button>
+                                        </td>
+                                    </tr>
+                                    <tr id="request-0" class="hidden">
+                                        <td colspan="6">
+                                            <div class="text-xs">
+                                                
+                                                
+                                                <div class="mb-4">
+                                                    <strong class="text-success">Response Body:</strong>
+                                                    <pre><code>{
+  &quot;id&quot;: 1,
+  &quot;title&quot;: &quot;Modified API Response&quot;,
+  &quot;body&quot;: &quot;This is a modified response that will cause the test to fail&quot;,
+  &quot;userId&quot;: 999
+}</code></pre>
+                                                </div>
+                                                
+                                                <div>
+                                                    <strong class="text-warn">Request Headers:</strong>
+                                                    <pre><code>{
+  &quot;accept&quot;: &quot;text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7&quot;,
+  &quot;accept-language&quot;: &quot;en-US&quot;,
+  &quot;upgrade-insecure-requests&quot;: &quot;1&quot;,
+  &quot;user-agent&quot;: &quot;Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/134.0.6998.35 Safari/537.36&quot;,
+  &quot;sec-ch-ua&quot;: &quot;\&quot;Chromium\&quot;;v=\&quot;134\&quot;, \&quot;Not:A-Brand\&quot;;v=\&quot;24\&quot;, \&quot;HeadlessChrome\&quot;;v=\&quot;134\&quot;&quot;,
+  &quot;sec-ch-ua-mobile&quot;: &quot;?0&quot;,
+  &quot;sec-ch-ua-platform&quot;: &quot;\&quot;Linux\&quot;&quot;
+}</code></pre>
+                                                </div>
+                                                
+                                                <div class="mt-4">
+                                                    <strong class="text-warn">Response Headers:</strong>
+                                                    <pre><code>{
+  &quot;content-length&quot;: &quot;123&quot;,
+  &quot;content-type&quot;: &quot;application/json&quot;
+}</code></pre>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="mt-4">
+                            <details>
+                                <summary>Network Stats</summary>
+                                <div class="card mt-2">
+                                    <div class="card-body">
+                                        <p><strong>Total Requests:</strong> 1</p>
+                                        <p><strong>Request Types:</strong> document (1)</p>
+                                        <p><strong>Status Codes:</strong> 2xx (1)</p>
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
+                    </div>
+                    <!-- Usage Info Tab -->
+                    <div class="tab-content" id="usage-tab">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">AI Model Details</h3>
+                            </div>
+                            <div class="card-body">
+                                <p><strong>Model:</strong> gemini-1.5-pro-latest</p>
+                                <p><strong>Provider:</strong> Google Generative AI</p>
+                                <div id="usageContentContainer">
+                                    
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        // Tab switching
+        document.addEventListener('DOMContentLoaded', function() {
+            const tabButtons = document.querySelectorAll('.tab-button');
+            tabButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    // Get the tab ID from the data-tab attribute
+                    const tabId = this.dataset.tab;
+                    
+                    // Remove active class from all buttons and tabs
+                    document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+                    
+                    // Add active class to clicked button and corresponding tab
+                    this.classList.add('active');
+                    document.getElementById(tabId + '-tab').classList.add('active');
+                });
+            });
+            
+            // Apply styles to filter buttons
+            const filterButtons = document.querySelectorAll('.filter-btn');
+            filterButtons.forEach(btn => {
+                if (btn.classList.contains('active-filter')) {
+                    btn.style.backgroundColor = 'var(--claude-purple)';
+                    btn.style.color = 'white';
+                }
+            });
+            
+            // Apply styles to AI filter buttons
+            const aiFilterButtons = document.querySelectorAll('.ai-filter-btn');
+            aiFilterButtons.forEach(btn => {
+                if (btn.classList.contains('active-filter')) {
+                    btn.style.backgroundColor = 'var(--claude-purple)';
+                    btn.style.color = 'white';
+                }
+            });
+        });
+        
+        // Toggle request details
+        function toggleDetails(id) {
+            const element = document.getElementById(id);
+            if (element.classList.contains('hidden')) {
+                element.classList.remove('hidden');
+            } else {
+                element.classList.add('hidden');
+            }
+        }
+        
+        // Network request filtering functions
+        function filterNetworkRequests() {
+            const searchText = document.getElementById('networkSearch').value.toLowerCase();
+            const rows = document.querySelectorAll('#networkTable tbody tr.network-row');
+            
+            rows.forEach(row => {
+                const url = row.getAttribute('data-url').toLowerCase();
+                const detailsRowId = 'request-' + (row.rowIndex - 2);
+                const detailsRow = document.getElementById(detailsRowId);
+                
+                // If the search text is found in the URL
+                if (url.includes(searchText)) {
+                    row.style.display = '';
+                    // Also handle any open detail rows
+                    if (detailsRow && !detailsRow.classList.contains('hidden')) {
+                        detailsRow.style.display = '';
+                    }
+                } else {
+                    row.style.display = 'none';
+                    // Also hide any open detail rows
+                    if (detailsRow) {
+                        detailsRow.style.display = 'none';
+                    }
+                }
+            });
+        }
+        
+        function filterByType(type) {
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                if (btn.getAttribute('data-filter') === type) {
+                    btn.classList.add('active-filter');
+                    btn.style.backgroundColor = 'var(--claude-purple)';
+                    btn.style.color = 'white';
+                } else {
+                    btn.classList.remove('active-filter');
+                    btn.style.backgroundColor = '';
+                    btn.style.color = '';
+                }
+                
+                if (btn.classList.contains('error-filter')) {
+                    btn.classList.remove('active-filter');
+                    btn.style.backgroundColor = '';
+                    btn.style.color = '';
+                }
+            });
+            
+            const rows = document.querySelectorAll('#networkTable tbody tr.network-row');
+            rows.forEach(row => {
+                const rowType = row.getAttribute('data-type');
+                const detailsRowId = 'request-' + (row.rowIndex - 2);
+                const detailsRow = document.getElementById(detailsRowId);
+                
+                if (type === 'all' || rowType === type) {
+                    row.style.display = '';
+                    if (detailsRow && !detailsRow.classList.contains('hidden')) {
+                        detailsRow.style.display = '';
+                    }
+                } else {
+                    row.style.display = 'none';
+                    if (detailsRow) {
+                        detailsRow.style.display = 'none';
+                    }
+                }
+            });
+        }
+        
+        function filterByStatus(status) {
+            const rows = document.querySelectorAll('#networkTable tbody tr.network-row');
+            rows.forEach(row => {
+                const status = parseInt(row.getAttribute('data-status') || '0');
+                const detailsRowId = 'request-' + (row.rowIndex - 2);
+                const detailsRow = document.getElementById(detailsRowId);
+                
+                if (status >= 400) {
+                    row.style.display = '';
+                    if (detailsRow && !detailsRow.classList.contains('hidden')) {
+                        detailsRow.style.display = '';
+                    }
+                } else {
+                    row.style.display = 'none';
+                    if (detailsRow) {
+                        detailsRow.style.display = 'none';
+                    }
+                }
+            });
+        }
+        
+        // AI content filtering functions
+        function searchAiContent() {
+            const searchText = document.getElementById('aiSearchInput').value.toLowerCase();
+            const container = document.getElementById('aiContentContainer');
+            
+            if (!searchText.trim()) {
+                // If search is empty, show everything and reset highlighting
+                showAllAiSections();
+                return;
+            }
+            
+            // Extract all headings and paragraphs for text search
+            const contentElements = container.querySelectorAll('h1, h2, h3, h4, h5, h6, p, li, code');
+            
+            // Track if we found any matches
+            let foundMatch = false;
+            
+            contentElements.forEach(element => {
+                const text = element.textContent.toLowerCase();
+                
+                // Check if this element contains the search text
+                if (text.includes(searchText)) {
+                    // Make sure this element and all its parents are visible
+                    let parent = element;
+                    while (parent && parent !== container) {
+                        if (parent.style) parent.style.display = '';
+                        parent = parent.parentElement;
+                    }
+                    
+                    // Highlight the matching text
+                    const originalHTML = element.innerHTML;
+                    const regex = new RegExp('(' + searchText + ')', 'gi');
+                    element.innerHTML = originalHTML.replace(regex, '<mark class="ai-highlight">$1</mark>');
+                    
+                    foundMatch = true;
+                } else if (element.style) {
+                    // Hide non-matching elements
+                    element.style.display = 'none';
+                }
+            });
+            
+            // If no match found, show a message
+            if (!foundMatch) {
+                const noResults = document.createElement('p');
+                noResults.textContent = 'No results found for "' + searchText + '"';
+                noResults.classList.add('text-dim');
+                noResults.id = 'ai-no-results';
+                
+                // Remove any existing no-results message
+                const existingMessage = document.getElementById('ai-no-results');
+                if (existingMessage) existingMessage.remove();
+                
+                container.prepend(noResults);
+            } else {
+                // Remove any existing no-results message
+                const existingMessage = document.getElementById('ai-no-results');
+                if (existingMessage) existingMessage.remove();
+            }
+        }
+        
+        function showAllAiSections() {
+            const container = document.getElementById('aiContentContainer');
+            const allElements = container.querySelectorAll('*');
+            
+            allElements.forEach(el => {
+                if (el.style) el.style.display = '';
+            });
+            
+            // Remove any existing no-results message
+            const existingMessage = document.getElementById('ai-no-results');
+            if (existingMessage) existingMessage.remove();
+        }
+        
+        function filterAiContent(type) {
+            // Update active button state
+            const buttons = document.querySelectorAll('.ai-filter-btn');
+            buttons.forEach(btn => {
+                if (btn.getAttribute('data-filter') === type) {
+                    btn.classList.add('active-filter');
+                    btn.style.backgroundColor = 'var(--claude-purple)';
+                    btn.style.color = 'white';
+                } else {
+                    btn.classList.remove('active-filter');
+                    btn.style.backgroundColor = '';
+                    btn.style.color = '';
+                }
+            });
+            
+            // Reset search field
+            if (document.getElementById('aiSearchInput')) {
+                document.getElementById('aiSearchInput').value = '';
+            }
+            
+            // Show all sections first
+            showAllAiSections();
+            
+            // If 'all' is selected, we're done
+            if (type === 'all') return;
+            
+            const container = document.getElementById('aiContentContainer');
+            
+            // Depending on the filter, show/hide relevant sections
+            switch(type) {
+                case 'root-cause':
+                    highlightSections(['root cause', 'issue', 'problem', 'error', 'failure', 'bug']);
+                    break;
+                case 'solution':
+                    highlightSections(['solution', 'fix', 'resolve', 'recommendation', 'suggest']);
+                    break;
+                case 'debugging':
+                    highlightSections(['debug', 'step', 'investigate', 'check', 'verify', 'test']);
+                    break;
+                case 'code':
+                    // Show all code blocks
+                    const codeBlocks = container.querySelectorAll('pre, code');
+                    codeBlocks.forEach(block => {
+                        // Make the code block and its container visible
+                        let parent = block;
+                        while (parent && parent !== container) {
+                            if (parent.style) parent.style.display = '';
+                            parent = parent.parentElement;
+                        }
+                    });
+                    
+                    // Hide elements that don't contain code
+                    const nonCodeElements = container.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6');
+                    nonCodeElements.forEach(el => {
+                        if (!el.querySelector('code') && !el.closest('pre')) {
+                            el.style.display = 'none';
+                        }
+                    });
+                    break;
+            }
+            
+            // Helper function to highlight sections with specific keywords
+            function highlightSections(keywords) {
+                // Get all section elements - each section starts with an h3 and ends at the next h3 or end of container
+                const sections = [];
+                const headings = container.querySelectorAll('h3');
+                
+                headings.forEach((heading, index) => {
+                    // Create a section object with the heading and all elements until next heading
+                    const section = {
+                        heading: heading,
+                        elements: []
+                    };
+                    
+                    // Get all elements after this heading until the next heading
+                    let currentElement = heading.nextElementSibling;
+                    while (currentElement && currentElement.tagName !== 'H3') {
+                        section.elements.push(currentElement);
+                        currentElement = currentElement.nextElementSibling;
+                    }
+                    
+                    // Add this section to our sections array
+                    sections.push(section);
+                });
+                
+                // Now filter each section based on keywords
+                sections.forEach(section => {
+                    // Get the text content of the entire section
+                    let sectionText = section.heading.textContent.toLowerCase();
+                    section.elements.forEach(el => {
+                        sectionText += ' ' + el.textContent.toLowerCase();
+                    });
+                    
+                    let shouldShow = false;
+                    for (const keyword of keywords) {
+                        if (sectionText.includes(keyword)) {
+                            shouldShow = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!shouldShow) {
+                        // Hide this section
+                        section.heading.style.display = 'none';
+                        section.elements.forEach(el => {
+                            el.style.display = 'none';
+                        });
+                    }
+                });
+            }
+        }
+
+        // Screenshot modal functions
+        function openScreenshotModal() {
+            const modal = document.getElementById('screenshotModal');
+            if (modal) {
+                modal.style.display = 'block';
+            }
+        }
+        
+        function closeScreenshotModal() {
+            const modal = document.getElementById('screenshotModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+        
+        // Close modal if clicking outside the image
+        window.onclick = function(event) {
+            const modal = document.getElementById('screenshotModal');
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        // Initialize highlightjs after DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            // Set up direct click handlers for screenshots
+            document.querySelectorAll('.failure-screenshot, .screenshot-thumbnail').forEach(thumbnail => {
+                thumbnail.addEventListener('click', function(e) {
+                    const modal = document.getElementById('screenshotModal');
+                    if (modal) {
+                        // Position the modal near the click position
+                        const x = e.pageX;
+                        const y = e.pageY;
+                        
+                        // Set max sizes to avoid modal going out of viewport
+                        const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+                        const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+                        
+                        // Calculate position, ensuring the modal stays within viewport
+                        let modalLeft = x - 20;
+                        let modalTop = y - 20;
+                        
+                        // Get modal dimensions (after temporarily making it visible offscreen)
+                        modal.style.display = 'block';
+                        modal.style.top = '-9999px';
+                        modal.style.left = '-9999px';
+                        const modalWidth = modal.offsetWidth;
+                        const modalHeight = modal.offsetHeight;
+                        
+                        // Adjust if the modal would go outside viewport
+                        if (modalLeft + modalWidth > viewportWidth) {
+                            modalLeft = viewportWidth - modalWidth - 20;
+                        }
+                        if (modalTop + modalHeight > viewportHeight) {
+                            modalTop = viewportHeight - modalHeight - 20;
+                        }
+                        
+                        // Ensure we don't go off the left or top edges
+                        modalLeft = Math.max(20, modalLeft);
+                        modalTop = Math.max(20, modalTop);
+                        
+                        // Position and show the modal
+                        modal.style.left = modalLeft + 'px';
+                        modal.style.top = modalTop + 'px';
+                    }
+                });
+            });
+            
+            // Also make sure the close button works
+            const closeButton = document.querySelector('.screenshot-close');
+            if (closeButton) {
+                closeButton.addEventListener('click', function() {
+                    const modal = document.getElementById('screenshotModal');
+                    if (modal) {
+                        modal.style.display = 'none';
+                    }
+                });
+            }
+
+            document.querySelectorAll('pre code').forEach((block) => {
+                hljs.highlightElement(block);
+            });
+            
+            // Apply card-header styling to headings in the AI Analysis tab
+            const aiContainer = document.getElementById('aiContentContainer');
+            if (aiContainer) {
+                const h3Elements = aiContainer.querySelectorAll('h3');
+                h3Elements.forEach(h3 => {
+                    // Create a new div with the card-header class
+                    const headerDiv = document.createElement('div');
+                    headerDiv.className = 'card-header';
+                    
+                    // Clone the h3 and add the card-title class
+                    const newHeading = h3.cloneNode(true);
+                    newHeading.className = 'card-title';
+                    
+                    // Insert the heading into the header div
+                    headerDiv.appendChild(newHeading);
+                    
+                    // Replace the original h3 with the header div
+                    h3.parentNode.insertBefore(headerDiv, h3);
+                    h3.remove();
+                });
+                
+                // Find the Failure Explanation heading and insert screenshot
+                
+                // Find the failure explanation section
+                const failureHeading = Array.from(aiContainer.querySelectorAll('.card-title')).find(
+                    heading => heading.textContent && heading.textContent.toLowerCase().includes('failure explanation')
+                );
+                
+                if (failureHeading) {
+                    // Get the parent card header
+                    const cardHeader = failureHeading.closest('.card-header');
+                    
+                    if (cardHeader) {
+                        // Get all content elements following this header until the next header
+                        const contentContainer = document.createElement('div');
+                        contentContainer.className = 'failure-explanation-container';
+                        
+                        // Create screenshot element
+                        const screenshot = document.createElement('img');
+                        screenshot.className = 'failure-screenshot';
+                        screenshot.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABQAAAALQCAIAAABAH0oBAAAAAXNSR0IArs4c6QAAIABJREFUeJzs3T9sW3ee6O3jwQJiMQBZDVmFbMYiEMRioysVCURgspCABJAQLyDBKaz1LaxkCivbWMEWr7eSqpWaGam5tpqJVdysVExgAZuBBCSAhesBpPfNDqybKaR1I3ob0cAsyFR8C+qfJVKWHMWJ832exglFkYfn/M6fD8lzdKlarSYAAADwc/eLH3sCAAAA4FUQwAAAAITwdz/2BLweLl269Lvf/e5vf/vbX/7yl5M/ffPNN3/5y1/+9re/bTQaP8bUAQAA8GKXfs7nAD/7/OqVe+999ccbb3zfR/r973+fzWZv3LjR7g537959+vTpxx9//H2fCQAAgB/GL5Lk6d33s5mmbP7Kuzemv376so/29O77+aufPTt+c/2LD/Pvzn77vSf2vNJvfTT50du/Otudv/7kSvenj9r88L//+79Pqd8kSW7cuPG3v/3tZSYSAACAV2LvHOBfj/97pVqtfPvvk91/nfrwnz4/0bCvp8vvXnvvcuoCHug//uM/Xniflt+OBgAA4Cfi4CJYqVSSpNKX3/vo2lv1b/6892ntlx9f7v7ks88+ef+d7u4rV7o//uJZkiRJ/dvPP73afTmfzV9+58P9z4u//PSd7u6/n3r07Os773R3d3d3f/JFPUmSR9Pvd3e/88nXz76Z/ofu7u7u7hufPUmSJHn0afflG18cdPY3d97Jf3hKdj/7/Gq2+8NPPnz/3Xff6X7n6p0vDz+k/uZOd/7G3c8/vdqcxg+bj//N7NXu7iuXs9n37z5Jjtz3nfzVT6dvXH3/nStXuq/OPqonSZJ8e/fD7u7uj//tyZPP/md3d3d39/uz31zoTAYAAODHd+wiWM+++fyLv6Z+feSk2Sdf3P3m7h++ms4m9adPnnUkSf3rT//hn/76wR+++sPb2WdffvoPNz7OfvX5tey7k1+9O/n07vv/44trX31+Lb3/692f/PHRJ/UvPuycfvt/f/nR5YOH7b72Xvb9z7589t7VdJIkjz774ulv7rybTk7z129T019++Xa6/ujTv//wn9766g9Xs3s/qf/p3te//8O/T76RSp49edKRJEny1kefP/ro2edXr9w79ij1P3+b/erzP76RfDv97t//y2cf/PFG9vKNPzy6kXz9yZVPUv/r0WT395mdAAAA/FTtfQL819mrly9fvpy//P695IN/nb6WPbhDqvujibezSZIkqewb2VRS/9Pdf0s+mLjzdjaVJNl3P/rHy3/+/E8v8Y3pt65d+/XXn33xNEmS+tefffHdu9d+c3r/Jr9+79rb6SRJUt3XfpP9+t/+XD/yYP848d4bqSRJkvQbb7zgK89vX3vvjSRJksvdb6Wf/PXJ6XcGAADg52LvE+Bf37j7x4m3UklHOn2sH3/1xhvPhel/Pfmv+tOvP+n+eu//v/uu49f1Z0nygno96fIH196a+uyLJ9euPfn8Tx3v/a9395/42WdXL3/8p++SJHnjo3///w4+kU2ls/vPkc6m639++ixJ9n4l9as3sq2eopVUR+rIpNa/O+9kAwAA8Hra/wp0RzqbPlPD/upX6dTlj/7w1SeXz3DnU2Wv/uPbU7NffJN99EX6vc8Pv3mcvvb502sn717/rydPk+SNJEmSp0+eptJHJ/cirnMFAADAz9ovznCf56Te/cf3nt37l7uPniZJktSffvPlF4d/Nimd/VXy5Jtv6sd/J/2r9JNHfz3+Ren0e9fefnL346k/vfHBtbde/MxPPp/57Ek9qT/5fPaLZ29/8PYFV2/6jfR/ffvXl/4LUAAAAPy0nTuAk/S7//q//583vvind/L5fP7K+5/ce3TYu6nffDRx+esbVy4fXjI6SZIkefujibf/+mn35StXruxdpXnv7jfe++6bb9+6dvUMHyen3nr3119++D/yne9MPfvg9/969bQvPde/+Lj7ypUr73z69bNH//L+lStXum989qK0fevaxAfPpt65fOXKlfenj18F+s0333zhBJ7lPgAAAPxYLlWr1R/x6b+dfvfvv77xfz6/9oJzeJ99fvXK7LtfffnRG6ff74fy+9//PpvN3rhxo90d7t69+/Tp048//vjVThcAAABn9XdnuM8P5tmXM/ee/GbyvTNfwepH89vf/vZ3v/vdP//zP//lL385+dM333zzl7/85W9/+9tGo/FjTB0AAAAv9qMF8KM73f9w79mvP5i++965LyD96jUajRd+uqt+AQAAfsp+5K9AAwAAwKtx/otgAQAAwGvo7x49evRjTwMAAAD84C45cxUAAIAIfAUaAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQB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AAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAAAAQhDAAAAAhCCAAQAACEEAAwAAEIIABgAAIAQBDAAAQAgCGAAAgBAEMAAAACEIYAAAAEIQwAAAAIQggAEAAAhBAAMAABCCAAYAACAEAQwAAEAIAhgAAIAQBDAAAAAhCGAAAABCEMAAAACEIIABAAAIQQADAAAQggAGAAAgBAEMAABACAIYAACAEAQwAAAAIQhgAID/v/06EAAAAAAQ5G89yGURAAsCDAAAwIIAAwAAsCDAAAAALAgwAAAACwIMAADAggADAACwIMAAAAAsCDAAAAALAgwAAMCCAAMAALAgwAAAACwIMAAAAAsCDAAAwIIAAwAAsCDAAAAALAgwAAAACwIMAADAggADAACwIMAAAAAsCDAAAAALAgwAAMCCAAMAALAgwAAAACwIMAAAAAsB4ejo4j73eTkAAAAASUVORK5CYII=';
+                        screenshot.alt = 'Error Screenshot';
+                        screenshot.onclick = function() { openScreenshotModal(); };
+                        
+                        // Create the text container for the explanation
+                        const textContainer = document.createElement('div');
+                        textContainer.className = 'failure-text';
+                        
+                        // Find all elements after the card header until the next card header or hr
+                        let currentElement = cardHeader.nextElementSibling;
+                        const collectedElements = [];
+                        
+                        while (currentElement && 
+                               !currentElement.matches('hr, .card-header')) {
+                            collectedElements.push(currentElement);
+                            const nextElement = currentElement.nextElementSibling;
+                            currentElement.remove();
+                            currentElement = nextElement;
+                        }
+                        
+                        // Append all collected elements to the text container
+                        collectedElements.forEach(el => {
+                            textContainer.appendChild(el);
+                        });
+                        
+                        // Add screenshot and text container to the content container
+                        contentContainer.appendChild(screenshot);
+                        contentContainer.appendChild(textContainer);
+                        
+                        // Insert the content container after the header
+                        if (currentElement) {
+                            cardHeader.parentNode.insertBefore(contentContainer, currentElement);
+                        } else {
+                            cardHeader.parentNode.appendChild(contentContainer);
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

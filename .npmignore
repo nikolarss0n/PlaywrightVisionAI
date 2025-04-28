@@ -1,0 +1,39 @@
+# Source code (since we're publishing the compiled dist)
+src/
+tests/
+test/
+playground/
+
+# Configuration files
+.travis.yml
+.github/
+.vscode/
+.editorconfig
+.eslintrc
+.eslintignore
+.prettierrc
+tsconfig.json
+jest.config.js
+
+# Logs and temp files
+*.log
+logs/
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+
+# Development and environment files
+node_modules/
+.DS_Store
+.env*
+!.env.example
+
+# Source control
+.git/
+.gitignore
+.gitattributes
+
+# Documentation that doesn't need to be in the package
+docs/
+examples/

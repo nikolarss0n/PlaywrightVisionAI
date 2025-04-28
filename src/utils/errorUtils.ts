@@ -1,3 +1,12 @@
+/**
+ * Utilities for error handling and extraction
+ */
+
+/**
+ * Extracts a selector from an error message
+ * @param error The error object
+ * @returns The extracted selector or undefined
+ */
 export function extractSelectorFromError(error: Error | undefined): string | undefined {
   if (!error?.message) {
     return undefined;
