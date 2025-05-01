@@ -295,12 +295,7 @@ When a test fails, you'll see detailed AI analysis in your test report:
 ### Terminal-Style Report
 Our new terminal-inspired interface design makes debugging more intuitive:
 
-![terminal_style_report](https://github.com/user-attachments/assets/a1da4119-5631-46d4-8d15-d279f0ed3e04)
-
-### Classic Glass Effect UI
-The original glass-effect design is still available:
-
-![classic_glass_ui](https://github.com/user-attachments/assets/94daecc2-da56-4078-a537-49078f9663d6)
+<img width="1214" alt="Screenshot 2025-05-01 at 15 11 04" src="https://github.com/user-attachments/assets/9f20bc18-395c-4026-bec3-5a46b7935b68" />
 
 ## API Reference
 
