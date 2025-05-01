@@ -15,6 +15,10 @@ Playwright Vision AI Debugger captures screenshots, HTML, and error details when
 - **Beautiful Glass UI Reports**: Generates elegant HTML reports with detailed analysis
 - **Token Optimization**: Cleans HTML to reduce token usage and minimize API costs
 - **Test Code Context**: Includes the failing test code for better debugging context
+- **Terminal-Style UI Option**: Modern terminal-inspired interface for more intuitive debugging
+- **Enhanced Test Integration**: Simplified one-line integration with complex test setups
+- **Flexible Model Selection**: Support for all Gemini models with vision capabilities
+- **Automatic Network Request Capture**: Built-in utilities to capture and analyze network traffic
 
 ## Installation
 
@@ -132,7 +136,7 @@ If you have a complex test setup with custom fixtures, page objects, or other ex
 
 ### Method 1: Using the Enhanced setupAiDebugging Function (Recommended)
 
-As of version 1.2.2+, the `setupAiDebugging` function has been improved to handle complex test setups:
+As of version 1.3.0+, the `setupAiDebugging` function has been improved to handle complex test setups:
 
 ```typescript
 // tests/base.ts
@@ -150,9 +154,29 @@ export const test = setupAiDebugging(baseTest);
 export * from './your-existing-test-setup';
 ```
 
-### Method 2: Direct afterEach Hook Integration
+### Method 2: Using the New enhanceTestWithAiDebugging Function
 
-If Method 1 doesn't work with your test setup, you can use this more direct approach:
+The new one-line integration method makes it even easier to add AI debugging to your tests:
+
+```typescript
+// tests/base.ts
+import { test as baseTest } from './your-existing-test-setup';
+import { enhanceTestWithAiDebugging } from 'playwright-vision-ai-debugger';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
+
+// One-line integration with your existing test setup
+export const test = enhanceTestWithAiDebugging(baseTest);
+
+// Re-export everything else
+export * from './your-existing-test-setup';
+```
+
+### Method 3: Direct afterEach Hook Integration
+
+If the above methods don't work with your test setup, you can use this more direct approach:
 
 ```typescript
 // tests/ai-base.ts
@@ -189,6 +213,33 @@ export const test = baseTest;
 
 // Re-export everything else
 export * from './your-existing-test-setup';
+```
+
+## Network Request Capture
+
+You can use the built-in network capture utilities to analyze network traffic in your tests:
+
+```typescript
+// tests/network-base.ts
+import { test as baseTest } from '@playwright/test';
+import { setupNetworkCapture } from 'playwright-vision-ai-debugger';
+
+export const test = baseTest.extend({
+  page: async ({ page }, use, testInfo) => {
+    // Set up network capture
+    const { networkRequests, teardown } = setupNetworkCapture(page);
+    
+    await use(page);
+    
+    // Access captured network requests after the test
+    console.log(`Captured ${networkRequests.length} network requests`);
+    
+    // Clean up
+    teardown();
+  }
+});
+
+export { expect } from '@playwright/test';
 ```
 
 ## Usage
@@ -255,7 +306,27 @@ The original glass-effect design is still available:
 
 The package exports the following:
 
-### `runAiDebuggingAnalysis(page, testInfo, error)`
+### `setupAiDebugging(testInstance)`
+
+Sets up AI debugging for a Playwright test instance.
+
+Parameters:
+- `testInstance`: Playwright Test object
+
+Returns:
+- Enhanced test object with AI debugging capabilities
+
+### `enhanceTestWithAiDebugging(testInstance)`
+
+New one-line integration method for adding AI debugging to any test setup.
+
+Parameters:
+- `testInstance`: Playwright Test object
+
+Returns:
+- Enhanced test object with AI debugging capabilities
+
+### `runAiDebuggingAnalysis(page, testInfo, error, existingNetworkRequests?)`
 
 The main function that orchestrates the AI debugging analysis process.
 
@@ -263,10 +334,22 @@ Parameters:
 - `page`: Playwright Page object
 - `testInfo`: Playwright TestInfo object
 - `error`: Error object from the failed test
+- `existingNetworkRequests`: (Optional) Array of already captured network requests
 
-### `AiDebuggingResult`
+### `setupNetworkCapture(page)`
 
-Interface for type hinting in consuming projects.
+Sets up network request capture for a Playwright page.
+
+Parameters:
+- `page`: Playwright Page object
+
+Returns:
+- Object containing networkRequests array and teardown function
+
+### Network Utilities
+
+- `setupAutomaticNetworkCapture(page)`: Automatically captures network requests
+- `getCapturedNetworkRequests()`: Returns captured network requests
 
 ## Requirements
 
@@ -324,7 +407,7 @@ To change the AI model:
 
 ## License
 
-This project is licensed under the ISC License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Contributing
 
