@@ -6,19 +6,21 @@ import { marked } from 'marked';
 
 // Import modules
 import { callDebuggingAI } from './aiCaller';
-import { 
-  captureHtml, 
-  captureScreenshot, 
-  extractErrorInfo, 
-  extractTestCode 
+import {
+  captureHtml,
+  captureScreenshot,
+  captureVideo,
+  extractErrorInfo,
+  extractTestCode,
+  extractVideoPath
 } from './contextGatherer';
-import { 
+import {
   setupNetworkCapture,
   formatNetworkRequestsForAi,
   extractNetworkRequestsFromAttachments
 } from './networkCapture';
-import { 
-  generateHtmlReport, 
+import {
+  generateHtmlReport,
   saveAndAttachReport
 } from './reportGenerator';
 import {
@@ -45,33 +47,47 @@ import { NetworkRequest } from './types';
  * @param existingNetworkRequests Optional array of already captured network requests
  */
 export async function runAiDebuggingAnalysis(
-  page: Page, 
-  testInfo: TestInfo, 
+  page: Page,
+  testInfo: TestInfo,
   error: any,
   existingNetworkRequests?: NetworkRequest[]
 ): Promise<void> {
   let aiAnalysisResult: any = null;
   let aiAnalysisHtml = '<p>AI Analysis could not be performed.</p>';
   let usageInfoHtml = '';
-  
+
   try {
     // --- Begin Context Gathering ---
     // Convert types to match function parameters
     const title = typeof testInfo.title === 'string' ? testInfo.title : undefined;
     const status = String(testInfo.status);
     const duration = Number(testInfo.duration);
-    
+
     logTestStart(title, status, duration);
-    
+
     const startTime = Date.now();
-    
+
     // Extract error information
     const { errorMsg, stackTrace, failingSelector } = extractErrorInfo(error);
-    
+
     // Capture HTML and screenshot
     const html = await captureHtml(page);
     const screenshotBase64 = await captureScreenshot(page);
-    
+
+    // Extract or capture video recording
+    let videoPath = extractVideoPath(testInfo);
+    if (videoPath) {
+      console.log(`✅ Video recording found at: ${videoPath}`);
+    } else {
+      // Try to capture a video if no existing recording was found
+      videoPath = await captureVideo(page, testInfo);
+      if (videoPath) {
+        console.log(`✅ Video recording captured at: ${videoPath}`);
+      } else {
+        console.warn("⚠️ Could not find or capture video recording.");
+      }
+    }
+
     // Extract test code
     const testCode = extractTestCode(testInfo);
     if (testCode) {
@@ -79,18 +95,18 @@ export async function runAiDebuggingAnalysis(
     } else {
       console.warn("⚠️ Could not extract test code.");
     }
-    
+
     // Network request handling - use existing requests if provided
     let networkRequests: NetworkRequest[] = existingNetworkRequests || [];
     let teardown = () => {}; // Default no-op function
-    
+
     // Only set up network capture if we don't already have network requests
     if (!existingNetworkRequests || existingNetworkRequests.length === 0) {
       // Set up network capture for the current page
       const capture = setupNetworkCapture(page);
       networkRequests = capture.networkRequests;
       teardown = capture.teardown;
-      
+
       // Also check for existing network request attachments
       try {
         const attachedRequests = extractNetworkRequestsFromAttachments(testInfo);
@@ -106,19 +122,20 @@ export async function runAiDebuggingAnalysis(
     } else {
       console.log(`✅ Using ${existingNetworkRequests.length} pre-captured network requests.`);
     }
-    
+
     // Context gathering complete
     const contextTime = Date.now() - startTime;
     logContextComplete(contextTime, failingSelector);
     // --- End Context Gathering ---
-    
+
     // --- Prepare AI Input ---
     // Format the network requests for AI
     const formattedNetworkRequests = formatNetworkRequestsForAi(networkRequests);
-    
+
     const aiInput = {
       html,
       screenshotBase64,
+      videoPath,
       errorMsg,
       stackTrace,
       failingSelector: failingSelector || undefined,
@@ -126,14 +143,14 @@ export async function runAiDebuggingAnalysis(
       testCode,
       networkRequests: formattedNetworkRequests
     };
-    
+
     // --- Call AI ---
     console.log("🧠 Calling AI for analysis...");
     const aiStartTime = Date.now();
     aiAnalysisResult = await callDebuggingAI(aiInput);
     const aiEndTime = Date.now();
     console.log(`✅ AI analysis completed in ${aiEndTime - aiStartTime}ms.`);
-    
+
     // --- Prepare AI Content for HTML ---
     if (aiAnalysisResult?.errorMarkdown) {
       console.error("AI Analysis Error:", aiAnalysisResult.errorMarkdown);
@@ -143,12 +160,12 @@ export async function runAiDebuggingAnalysis(
     } else {
       aiAnalysisHtml = '<p>AI analysis returned no content.</p>';
     }
-    
+
     // Prepare Usage Info HTML
     if (aiAnalysisResult?.usageInfoMarkdown) {
       usageInfoHtml = marked.parse(aiAnalysisResult.usageInfoMarkdown) as string;
     }
-    
+
     // --- Generate and Save HTML Report ---
     const htmlReport = generateHtmlReport({
       testInfo,
@@ -159,30 +176,31 @@ export async function runAiDebuggingAnalysis(
       networkRequests,
       aiAnalysisHtml,
       usageInfoHtml,
-      screenshotBase64
+      screenshotBase64,
+      videoPath
     });
-    
+
     // Save and attach the report
     await saveAndAttachReport(
-      testInfo, 
-      htmlReport, 
+      testInfo,
+      htmlReport,
       aiAnalysisResult?.analysisMarkdown,
       aiAnalysisResult?.usageInfoMarkdown
     );
-    
+
     // Clean up network capture
     teardown();
-    
+
     // Log analysis completion
     logAnalysisComplete();
-    
+
   } catch (captureError: unknown) {
     const errorMessage = captureError instanceof Error ? captureError.message : String(captureError);
     console.error(`\n❌ Critical error during failure processing: ${errorMessage}`, captureError);
-    
+
     // Log error box
     logErrorBox("❌ Context Capture/Processing Error ❌", errorMessage);
-    
+
     // Attempt to attach a basic error report
     try {
       await testInfo.attach('ai-processing-error.txt', {
@@ -233,7 +251,7 @@ export function setupAiDebugging(testInstance: any): any {
           }
         }
       });
-      
+
       return enhancedTest;
     } catch (error) {
       console.warn("Could not extend test with AI debugging. Falling back to afterEach hook method.");
@@ -246,7 +264,7 @@ export function setupAiDebugging(testInstance: any): any {
     testInstance.afterEach(async ({ page, customPage }: { page?: Page, customPage?: Page }, testInfo: TestInfo) => {
       // Use whichever page object is available
       const activePage = customPage || page;
-      
+
       if (testInfo.status === 'failed' && testInfo.error && activePage) {
         try {
           // Pass the original error directly without conversion - let extractErrorInfo handle it
@@ -268,7 +286,7 @@ export function setupAiDebugging(testInstance: any): any {
 /**
  * Enhanced setup function for AI debugging - combines network capture and AI debugging
  * Provides elegant one-line integration for complex test setups
- * 
+ *
  * @param testInstance The test instance to enhance with AI debugging and network capture
  * @param options Optional configuration options
  * @returns The enhanced test instance with AI debugging and network capture
@@ -288,7 +306,7 @@ export function enhanceTestWithAiDebugging(
     includeNetworkCapture: true,
     ...options
   };
-  
+
   if (!testInstance) {
     console.error("Test instance is undefined or null. Cannot set up AI debugging.");
     return testInstance;
@@ -316,16 +334,16 @@ export function enhanceTestWithAiDebugging(
       // Handle custom page property in a type-safe way
       const customPage = opts.customPageProperty ? restFixtures[opts.customPageProperty] : undefined;
       const pageToUse = customPage || page;
-      
+
       // Run AI debugging based on runOnlyOnFailure option and test status
-      const shouldRunDebugging = opts.runOnlyOnFailure 
+      const shouldRunDebugging = opts.runOnlyOnFailure
         ? testInfo.status === 'failed' && testInfo.error && pageToUse
         : pageToUse !== undefined;
-      
+
       if (shouldRunDebugging) {
         try {
           console.log(`Running AI debugging for test: ${testInfo.title}`);
-          
+
           // Get any captured network requests if network capture is enabled
           let networkRequests = [];
           if (opts.includeNetworkCapture) {
@@ -337,10 +355,10 @@ export function enhanceTestWithAiDebugging(
               console.warn("⚠️ Could not get captured network requests:", e);
             }
           }
-          
+
           // Get the error from testInfo
           const error = testInfo.error || new Error("Test debugger invoked without an error");
-          
+
           // Run the AI debugging analysis with the captured network requests
           await runAiDebuggingAnalysis(pageToUse, testInfo, error, networkRequests);
         } catch (e) {
@@ -348,7 +366,7 @@ export function enhanceTestWithAiDebugging(
         }
       }
     });
-    
+
     console.log("✅ AI debugging enhancement complete.");
   } catch (error) {
     console.error("❌ Failed to set up AI debugging:", error);

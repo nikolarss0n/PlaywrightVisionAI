@@ -25,16 +25,16 @@ export const MODEL_NAME = process.env.GEMINI_MODEL_NAME || "gemini-1.5-pro-lates
 const MODEL_PRICING: { [key: string]: { inputPer1k: number; outputPer1k: number; currency: string } } = {
   // 2.0 Models
   "gemini-2.0-flash": { inputPer1k: 0.0003125, outputPer1k: 0.00125, currency: "USD" },
-  
+
   // 1.5 Models
   "gemini-1.5-pro-latest": { inputPer1k: 0.0035, outputPer1k: 0.0105, currency: "USD" },
   "gemini-1.5-flash-latest": { inputPer1k: 0.0003125, outputPer1k: 0.00125, currency: "USD" },
   "gemini-1.5-pro-vision": { inputPer1k: 0.0035, outputPer1k: 0.0105, currency: "USD" },
-  
+
   // 1.0 Models (if needed)
   "gemini-pro-vision": { inputPer1k: 0.0025, outputPer1k: 0.0075, currency: "USD" },
   "gemini-1.0-pro-vision": { inputPer1k: 0.0025, outputPer1k: 0.0075, currency: "USD" },
-  
+
   // Default pricing for any other model not explicitly listed
   "default": { inputPer1k: 0.0035, outputPer1k: 0.0105, currency: "USD" }
 };
@@ -110,7 +110,7 @@ export async function callDebuggingAI(data: AiAnalysisInput): Promise<AiDebuggin
 
     // Structured prompt engineering with clear role definition
     const textPrompt = buildAnalysisPrompt(data, htmlContextDescription);
-    
+
 
 
     // Prepare parts for the AI call
@@ -185,7 +185,7 @@ function processHtmlContext(originalHtml?: string): {htmlContext: string; htmlCo
 
   // Simple token estimation (1 token ≈ 4 characters)
   const tokenCount = Math.floor(bodyContent.length / 4);
-  
+
   if (tokenCount <= MAX_CONTEXT_TOKENS) {
     return {
       htmlContext: bodyContent,
@@ -196,10 +196,10 @@ function processHtmlContext(originalHtml?: string): {htmlContext: string; htmlCo
   // Dynamic chunking with priority to interactive elements
   const interactiveElements = bodyContent.match(/<(a|button|input|form)[^>]*>/gi) || [];
   const interactiveContext = interactiveElements.slice(0, 20).join('\n');
-  
+
   // Preserve structural elements
   const structuralElements = bodyContent.match(/<(header|main|nav|section|footer)[^>]*>/gi) || [];
-  
+
   return {
     htmlContext: `<!-- SEMANTIC CONTEXT EXTRACTION -->\n${
       structuralElements.slice(0, 5).join('\n')
@@ -219,14 +219,22 @@ function buildAnalysisPrompt(data: AiAnalysisInput, htmlContextDesc: string): st
 **Role**: You are a Senior Quality Engineer analyzing a test failure in a complex web application.
 
 **Context**:
-- ${data.screenshotBase64 ? 'Visual snapshot available - prioritize visual analysis.' : 'No visual context available.'}
+- ${data.screenshotBase64 ? 'Visual snapshot available - use for static analysis of the page state at failure point.' : 'No screenshot available.'}
+- ${data.videoPath ? `Video recording available at "${data.videoPath}" - DO NOT use hypothetical language like "assuming a video shows". The video has been recorded and shows the actual sequence of interactions leading to failure. Analyze it for dynamic interactions, transitions, and timing issues.` : 'No video recording available.'}
 - HTML Context: ${htmlContextDesc}
-- ${data.networkRequests ? 'Network activity data provided.' : 'No network data provided.'}
+- ${data.networkRequests && data.networkRequests !== "No network requests captured." ? 'Network activity data provided.' : 'No network requests captured - consider server connectivity issues or blank page scenarios.'}
 
 **Analysis Framework & Instructions**:
-Based *primarily on the screenshot* (if provided) and secondarily on the HTML context:
+Perform a comprehensive analysis using all available evidence:
+1. **Screenshot Analysis**: Examine the static page state at the moment of failure
+2. **Video Analysis**: If available, analyze the sequence of interactions leading to failure, looking for timing issues, transitions, or intermittent problems
+3. **HTML Analysis**: Examine the DOM structure for clues about element state and availability
+4. **Network Analysis**: Check for API issues, failed requests, or connectivity problems
 
-1.  **Identify Element:** Clearly identify the specific UI element the test likely intended to interact with, given the failing selector \\\`${data.failingSelector || 'N/A'}\\\` and error message. Describe its visual appearance and location *from the screenshot*. If no screenshot, infer from HTML.
+1.  **Identify Element:** Clearly identify the specific UI element the test likely intended to interact with, given the failing selector \\\`${data.failingSelector || 'N/A'}\\\` and error message.
+    - **From screenshot**: Describe its visual appearance and location on the page
+    - **From video**: Describe what you actually observe in the video recording - including page load sequence, element appearance timing, interactions attempted, and any visual changes that occur. Be specific about what you see in the actual video recording.
+    - **From HTML**: Analyze its DOM structure, attributes, and parent-child relationships
 
 2.  **Suggest Playwright Locators (Prioritized):** Suggest 1-3 robust **alternative** locators for this element, following Playwright best practices (User-Facing > Test ID > CSS/XPath).
     *   Clearly label the type (e.g., "**User-Facing (Role):**").
@@ -234,8 +242,13 @@ Based *primarily on the screenshot* (if provided) and secondarily on the HTML co
     *   Briefly explain the reasoning for *each* suggestion.
     *   Aim for uniqueness and stability.
 
-3.  **Explain Failure:** Provide a concise explanation of the *most likely* reason the original selector (\\\`${data.failingSelector || 'N/A'}\\\`) failed, consistent with the screenshot/HTML.
-    ${data.networkRequests ? '*   Check if network requests indicate any API issues that might be related to the failure.' : ''}
+3.  **Explain Failure:** Provide a concise explanation of the *most likely* reason the original selector (\\\`${data.failingSelector || 'N/A'}\\\`) failed.
+    - **From Screenshot**: Analyze visual state at failure point (element visibility, rendering issues)
+    - **From Video**: Describe the specific sequence of events you observe in the video recording. Include details about page loading, element appearance/disappearance, and any interactions that occur. Explain how these observations relate to the test failure.
+    - **From HTML**: Check for structural issues, missing attributes, or incorrect DOM hierarchy
+    ${data.networkRequests && data.networkRequests !== "No network requests captured."
+      ? '*   **From Network**: Analyze if API responses, status codes, or payload issues contributed to the failure.'
+      : '*   **Network Issues**: Since no network requests were captured, analyze if this could be due to server connectivity issues, blank page loading, or other network-related problems.'}
 
 ${data.testCode ? `4.  **Test Improvement Suggestions:** Review the test code provided below and suggest improvements:
     *   Replace hardcoded waits (like \`page.waitForTimeout\`) with proper web assertions or state checks (e.g., \`expect(locator).toBeVisible()\`).
@@ -258,6 +271,10 @@ ${data.testCode ? `4.  **Test Improvement Suggestions:** Review the test code pr
 Test: ${data.testTitle || 'Unnamed Test'}
 Error: ${data.errorMsg}
 Selector Attempted: ${data.failingSelector || 'N/A'}
+${data.videoPath ? `Video Recording: ${data.videoPath}
+IMPORTANT: The video recording shows the actual test execution. You must analyze what you see in this recording. Do not use hypothetical language.` : 'No video recording available'}
+${data.screenshotBase64 ? 'Screenshot: Available (Analyze for static page state at failure point)' : 'No screenshot available'}
+${data.networkRequests && data.networkRequests !== "No network requests captured." ? 'Network Requests: Available (Check for API issues or failed requests)' : 'Network Requests: None captured (Consider connectivity issues)'}
 ${data.stackTrace ? `Stack Trace:\n\\\`\\\`\\\`\n${data.stackTrace}\n\\\`\\\`\\\`` : ''}
 ${data.testCode ? `\nTest Code:\n\\\`\\\`\\\`javascript\n${data.testCode}\n\\\`\\\`\\\`` : ''}
 `;
@@ -291,7 +308,7 @@ function processUsageAndCost(usage?: UsageMetadata): string | null {
   if (usageAvailable && promptTokens !== undefined && completionTokens !== undefined && totalTokens !== undefined) {
     // Get pricing info for the model, or use default if not specifically listed
     const modelPricingInfo = MODEL_PRICING[MODEL_NAME] || MODEL_PRICING.default;
-    
+
     currency = modelPricingInfo.currency;
     const inputCost = (promptTokens / 1000) * modelPricingInfo.inputPer1k;
     const outputCost = (completionTokens / 1000) * modelPricingInfo.outputPer1k;
@@ -312,7 +329,7 @@ function processUsageAndCost(usage?: UsageMetadata): string | null {
 *Pricing as of March 2025. Check [ai.google.dev/pricing](https://ai.google.dev/pricing) for latest rates.*
 `;
   }
-  
+
   // Return simpler message if counts are missing
   return `*Usage information incomplete or unavailable. Cost cannot be estimated.* (Model: ${MODEL_NAME})`;
 }

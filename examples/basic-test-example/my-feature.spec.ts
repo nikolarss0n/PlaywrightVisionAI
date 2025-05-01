@@ -39,3 +39,9 @@ test('should correctly display API data from JSONPlaceholder', async ({ page }) 
     throw new Error('Expected to find userId: 1 in the response, but it was modified by our API interceptor');
   }
 });
+
+test('should correctly display Playwright link', async ({ page }) => {
+  await page.goto('https://playwright.dev/');
+  await expect(page).toHaveTitle(/WRONG TITLE/);
+  await expect(page.getByRole('link', { name: 'Get star' })).toBeVisible();
+});

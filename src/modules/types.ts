@@ -11,6 +11,8 @@ export interface AiAnalysisInput {
   html?: string;
   /** Base64-encoded screenshot */
   screenshotBase64?: string;
+  /** Video recording path or base64-encoded video data */
+  videoPath?: string;
   /** Error message */
   errorMsg: string;
   /** Error stack trace */

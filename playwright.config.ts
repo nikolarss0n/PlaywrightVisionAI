@@ -11,6 +11,7 @@ export default defineConfig({
     headless: true, // Run in headless mode by default
     trace: 'on',    // Capture traces for all test runs
     screenshot: 'on', // Take screenshots on failure
+    video: 'on', // Always record videos to help with debugging
   },
   projects: [
     {
