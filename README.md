@@ -69,27 +69,32 @@ If you're working on this package locally or want to use it before publishing to
 
 ## Setup
 
-### Simple One-Line Setup (Recommended)
+### Centralized Fixtures Approach (Recommended)
 
-The simplest way to add AI debugging to your tests is with our one-line setup:
+The simplest way to add AI debugging to your tests is with our centralized fixtures approach:
 
 1. **Install the package:**
    ```bash
    npm install playwright-vision-ai-debugger
    ```
 
-2. **Create a test base file:**
+2. **Create a fixtures.ts file:**
    ```typescript
-   // tests/base.ts
-   import { createAiTest } from 'playwright-vision-ai-debugger';
-   export const test = createAiTest();
+   // fixtures.ts
+   import { test as baseTest } from '@playwright/test';
+   import { enhanceTestWithAiDebugging } from 'playwright-vision-ai-debugger';
+   
+   // Enhance the base test with AI debugging capabilities
+   export const test = enhanceTestWithAiDebugging(baseTest);
+   
+   // Re-export expect so tests can import both from one place
    export { expect } from '@playwright/test';
    ```
 
 3. **Use in your tests:**
    ```typescript
    // tests/example.spec.ts
-   import { test, expect } from './base';
+   import { test, expect } from '../fixtures';
    
    test('my test', async ({ page }) => {
      await page.goto('https://example.com');
@@ -105,13 +110,24 @@ The simplest way to add AI debugging to your tests is with our one-line setup:
    ANTHROPIC_API_KEY=your-claude-api-key-here
    
    # Optional: Set your preferred model
-   DEFAULT_AI_PROVIDER=gemini  # Options: gemini, claude, both
+   DEFAULT_AI_PROVIDER=claude  # Options: gemini, claude, both
    ```
    
    Get your Gemini API key from [Google AI Studio](https://makersuite.google.com/)
    Get your Claude API key from [Anthropic Console](https://console.anthropic.com/)
 
 That's it! When a test fails, you'll get AI-powered analysis automatically.
+
+### Alternative: Direct Function Approach
+
+If you prefer the older approach with createAiTest function:
+
+```typescript
+// tests/base.ts
+import { createAiTest } from 'playwright-vision-ai-debugger';
+export const test = createAiTest();
+export { expect } from '@playwright/test';
+```
 
 ### Adding AI Debugging to Existing Custom Test Setup
 
@@ -140,9 +156,10 @@ For more control, you can configure the behavior in your test setup or set envir
 
 ```typescript
 // tests/multi-model-base.ts
-import { createAiTest } from 'playwright-vision-ai-debugger';
+import { test as baseTest } from '@playwright/test';
+import { enhanceTestWithAiDebugging } from 'playwright-vision-ai-debugger';
 
-export const test = createAiTest({
+export const test = enhanceTestWithAiDebugging(baseTest, {
   // AI Provider options
   aiProvider: 'both',                // 'gemini', 'claude', or 'both'
   preferredModel: 'claude',          // Which model's results to prioritize
@@ -198,9 +215,33 @@ VIDEO_FRAME_INTERVAL=0           # 0 = extract at key moments
 - `claude-3-haiku-20240307` - Fastest, most cost-effective model
 - Other Claude models with vision capabilities
 
+## What's Collected Automatically vs. Manually
+
+For a visual representation of what's gathered automatically versus manually, see the [VISUALIZATION.md](./VISUALIZATION.md) file. The diagram shows:
+
+- **Automatic Collection (Blue)**: Most data is collected without any user intervention, including screenshots, HTML, error messages, network requests, and more.
+- **Manual Collection (Orange)**: Very little manual setup is needed. Only specialized use cases might require additional configuration.
+- **AI Processing (Green)**: The entire AI analysis process is fully automated with either Claude, Gemini, or both models.
+- **Report Generation (Yellow)**: The HTML report is automatically generated with detailed analysis and recommendations.
+
 ## Network Request Capture
 
-You can use the built-in network capture utilities to analyze network traffic in your tests:
+All network requests are captured automatically when using our enhanced tests. This includes API calls made with `page.request.*` methods:
+
+```typescript
+test('example with direct API call', async ({ page }) => {
+  // Make API call - automatically captured
+  const response = await page.request.get('https://api.example.com/data');
+  const data = await response.json();
+  
+  // That's it! No manual tracking needed
+  
+  // Continue with test...
+  expect(data.status).toBe('success');
+});
+```
+
+For manual capture setup (rarely needed), you can use:
 
 ```typescript
 // tests/network-base.ts
@@ -227,17 +268,25 @@ export { expect } from '@playwright/test';
 
 ## Usage
 
-Now, import your extended test in your test files:
+Import your enhanced test in your test files:
 
 ```typescript
-// tests/my-test.spec.ts
-import { test } from './base';
-import { expect } from '@playwright/test';
+// tests/example.spec.ts
+import { test, expect } from '../fixtures';
 
-test('example test', async ({ page }) => {
-  await page.goto('https://example.com');
-  await page.click('text=Non-existent button');  // This will fail
-  expect(await page.isVisible('.some-selector')).toBeTruthy();
+test('should fail with API call comparison', async ({ page }) => {
+  // Go to JSONPlaceholder API demo site for context
+  await page.goto('https://jsonplaceholder.typicode.com/');
+  
+  // Make multiple API calls - all automatically captured
+  const response1 = await page.request.get('https://jsonplaceholder.typicode.com/posts/1');
+  const data1 = await response1.json();
+  
+  const response2 = await page.request.get('https://jsonplaceholder.typicode.com/posts/2');
+  const data2 = await response2.json();
+  
+  // Comparison that will fail on purpose to see AI analysis
+  expect(data1.title).toBe(data2.title, 'The two posts should have the same title');
 });
 ```
 
@@ -355,19 +404,20 @@ The package exports the following:
 
 ### Test Integration API
 
-#### `setupAiDebugging(testInstance)`
+#### `enhanceTestWithAiDebugging(testInstance, options?)`
 
-Sets up AI debugging for a Playwright test instance.
+New one-line integration method for adding AI debugging to any test setup.
 
 Parameters:
 - `testInstance`: Playwright Test object
+- `options`: Optional configuration object
 
 Returns:
 - Enhanced test object with AI debugging capabilities
 
-#### `enhanceTestWithAiDebugging(testInstance)`
+#### `setupAiDebugging(testInstance)`
 
-New one-line integration method for adding AI debugging to any test setup.
+Sets up AI debugging for a Playwright test instance.
 
 Parameters:
 - `testInstance`: Playwright Test object
@@ -416,7 +466,7 @@ Returns:
 
 - Node.js 16 or higher
 - Playwright Test 1.30.0 or higher
-- A Google Gemini API key
+- A Google Gemini API key or Anthropic Claude API key (or both)
 
 ## Troubleshooting
 
@@ -471,7 +521,10 @@ CLAUDE_MODEL=claude-3-sonnet-20240229
 
 ##### Using Code Configuration:
 ```typescript
-const test = createAiTest({
+import { test as baseTest } from '@playwright/test';
+import { enhanceTestWithAiDebugging } from 'playwright-vision-ai-debugger';
+
+export const test = enhanceTestWithAiDebugging(baseTest, {
   aiProvider: 'both', 
   preferredModel: 'claude'
 });
@@ -482,7 +535,7 @@ const test = createAiTest({
 Claude doesn't support direct video analysis like Gemini does. The package automatically extracts key frames from videos for Claude analysis:
 
 ```typescript
-const test = createAiTest({
+const test = enhanceTestWithAiDebugging(baseTest, {
   aiProvider: 'claude',
   useVideoFrames: true,  // Enabled by default for Claude
   maxFrames: 8          // Extract up to 8 key frames
