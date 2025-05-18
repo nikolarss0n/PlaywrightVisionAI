@@ -1,5 +1,4 @@
 import { defineConfig, devices } from '@playwright/test';
-import path from 'path';
 
 export default defineConfig({
   // Test directory
@@ -17,7 +16,7 @@ export default defineConfig({
   
   // Configure Playwright 
   use: {
-    baseURL: 'https://jsonplaceholder.typicode.com',
+    baseURL: 'https://playwright.dev',
     trace: 'on',
     screenshot: 'only-on-failure',
     video: 'on',
@@ -29,5 +28,14 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-  ]
+  ],
+  
+  // Longer timeout to allow AI analysis to complete
+  // Test timeout allows plenty of time for AI analysis to complete
+  timeout: 60000,
+  
+  // Configure expectations - locator wait timeout is 15 seconds
+  expect: {
+    timeout: 15000
+  },
 });
