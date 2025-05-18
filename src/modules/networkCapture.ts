@@ -128,9 +128,9 @@ export function setupAutomaticNetworkCapture(testObject: any): any {
   const testNetworkCaptureTeardowns = new Map<string, Function>();
 
   // Add beforeEach hook to start capturing network requests
-  testObject.beforeEach(async ({ page, context, customPage }: any, testInfo: any) => {
-    // Use either the custom page, standard page, or get a page from context
-    const pageToUse = customPage || page || (context ? await context.newPage() : null);
+  testObject.beforeEach(async ({ page, context }: { page?: Page, context?: any }, testInfo: any) => {
+    // Just use standard page or get a page from context
+    const pageToUse = page || (context ? await context.newPage() : null);
     
     if (pageToUse) {
       // Set up network capture for this test
@@ -231,27 +231,50 @@ export function formatNetworkRequestsForAi(networkRequests: NetworkRequest[]): s
     
     // Add request/response body if available and is an API call
     if (req.resourceType === 'xhr' || req.resourceType === 'fetch') {
-      if (req.requestPostData) {
+      if (req.requestPostData || req.requestBody) {
+        const dataSource = req.requestBody || req.requestPostData;
         try {
-          // Try to parse as JSON first
-          const parsedData = JSON.parse(req.requestPostData);
-          requestInfo.requestBody = parsedData;
+          // Check if data is already an object (from manually tracked requests)
+          if (typeof dataSource === 'object' && dataSource !== null) {
+            // Already an object, use directly
+            requestInfo.requestBody = dataSource;
+          } else {
+            // Try to parse as JSON
+            const parsedData = JSON.parse(dataSource);
+            requestInfo.requestBody = parsedData;
+          }
         } catch (e) {
           // If not valid JSON, use as string but limit length
-          requestInfo.requestData = req.requestPostData.substring(0, 500) + 
-            (req.requestPostData.length > 500 ? '... (truncated)' : '');
+          if (typeof dataSource === 'string') {
+            requestInfo.requestData = dataSource.substring(0, 500) + 
+              (dataSource.length > 500 ? '... (truncated)' : '');
+          } else {
+            // Just stringify and use as data if it's not a string
+            requestInfo.requestData = JSON.stringify(dataSource).substring(0, 500);
+          }
         }
       }
       
       if (req.responseBody) {
         try {
-          // Try to parse as JSON first
-          const parsedData = JSON.parse(req.responseBody);
-          requestInfo.responseBody = parsedData;
+          // Check if responseBody is already an object (from manually tracked requests)
+          if (typeof req.responseBody === 'object' && req.responseBody !== null) {
+            // Already an object, use directly
+            requestInfo.responseBody = req.responseBody;
+          } else {
+            // Try to parse as JSON
+            const parsedData = JSON.parse(req.responseBody);
+            requestInfo.responseBody = parsedData;
+          }
         } catch (e) {
           // If not valid JSON, use as string but limit length
-          requestInfo.responseData = req.responseBody.substring(0, 500) + 
-            (req.responseBody.length > 500 ? '... (truncated)' : '');
+          if (typeof req.responseBody === 'string') {
+            requestInfo.responseData = req.responseBody.substring(0, 500) + 
+              (req.responseBody.length > 500 ? '... (truncated)' : '');
+          } else {
+            // Just stringify and use as data if it's not a string
+            requestInfo.responseData = JSON.stringify(req.responseBody).substring(0, 500);
+          }
         }
       }
     }

@@ -1,26 +1,35 @@
 {
   "name": "playwright-vision-ai-debugger",
-  "version": "1.3.0",
-  "description": "AI-powered visual debugging overlay for Playwright tests using Gemini 1.5",
+  "version": "1.5.0",
+  "description": "AI-powered visual debugging for Playwright tests using Gemini and Claude",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "reporter.js"
   ],
   "scripts": {
     "build": "tsc",
     "test": "npx playwright test --reporter=html",
     "test:debug": "playwright test --debug",
+    "post-analysis": "ts-node examples/post-test-analysis/run-analysis.ts",
+    "test:with-analysis": "npm run test && npm run post-analysis",
+    "check-config": "ts-node src/scripts/verify-config.ts",
     "prepublishOnly": "npm run build"
   },
   "author": "Your Name",
   "license": "ISC",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.19.2",
     "@google/generative-ai": "^0.24.0",
-    "dotenv": "^16.4.7",
+    "dotenv": "^16.5.0",
+    "ffmpeg-extract-frames": "^2.0.2",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "get-video-duration": "^3.1.0",
     "marked": "^15.0.7"
   },
   "peerDependencies": {
@@ -39,7 +48,11 @@
     "debugging",
     "visual testing",
     "test automation",
-    "gemini ai"
+    "gemini ai",
+    "claude ai",
+    "anthropic",
+    "multi-model",
+    "ai analysis"
   ],
   "repository": {
     "type": "git",

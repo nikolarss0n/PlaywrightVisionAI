@@ -12,8 +12,9 @@
     "resolveJsonModule": true,
     "sourceMap": true,
     "types": ["node"],
-    "lib": ["ES2020", "DOM"]
+    "lib": ["ES2020", "DOM"],
+    "typeRoots": ["./node_modules/@types", "./types"]
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "types/**/*.d.ts"],
   "exclude": ["node_modules", "**/*.spec.ts", "playwright-report", "test-results"]
 }

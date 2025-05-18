@@ -8,9 +8,13 @@ export default defineConfig({
   workers: 1,  // Single worker for predictable runs
   reporter: 'html',
   use: {
-    headless: true, // Run in headless mode by default
+    headless: false, // Run in headed mode for testing
     trace: 'on',    // Capture traces for all test runs
     screenshot: 'on', // Take screenshots on failure
+    video: {
+      mode: 'on',
+      size: { width: 1280, height: 720 }
+    }, // Record video for all tests with specific size
   },
   projects: [
     {

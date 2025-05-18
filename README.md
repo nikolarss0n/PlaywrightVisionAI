@@ -4,7 +4,7 @@ Transforms Playwright test debugging with AI-powered visual analysis.
 
 ## What It Is
 
-Playwright Vision AI Debugger captures screenshots, HTML, and error details when tests fail, then uses Google's Gemini 1.5 Pro Vision model to visually analyze what went wrong and suggest fixes.
+Playwright Vision AI Debugger captures screenshots, HTML, and error details when tests fail, then uses advanced AI models (Google's Gemini and Anthropic's Claude) to visually analyze what went wrong and suggest fixes.
 
 ## Key Features
 
@@ -16,9 +16,15 @@ Playwright Vision AI Debugger captures screenshots, HTML, and error details when
 - **Token Optimization**: Cleans HTML to reduce token usage and minimize API costs
 - **Test Code Context**: Includes the failing test code for better debugging context
 - **Terminal-Style UI Option**: Modern terminal-inspired interface for more intuitive debugging
-- **Enhanced Test Integration**: Simplified one-line integration with complex test setups
-- **Flexible Model Selection**: Support for all Gemini models with vision capabilities
+- **One-Line Integration**: Ultra-simple one-line setup for hassle-free integration
+- **Multi-Model Analysis**: Support for both Google's Gemini and Anthropic's Claude models
+- **Video Frame Extraction**: Advanced video processing to extract key frames for more efficient analysis
+- **Model Fallback**: Graceful fallback between models if one fails or hits rate limits
 - **Automatic Network Request Capture**: Built-in utilities to capture and analyze network traffic
+
+## Simple Example
+
+Check out the [reporter-example](./examples/reporter-example) for a minimal implementation showing how to integrate Playwright Vision AI Debugger with just one line of code.
 
 ## Installation
 
@@ -63,157 +69,134 @@ If you're working on this package locally or want to use it before publishing to
 
 ## Setup
 
-1. **Get a Google Gemini API Key:**
-   - Visit [Google AI Studio](https://makersuite.google.com/) and create an API key
-   - Create a `.env` file in your project root with:
-     ```
-     GEMINI_API_KEY=your-api-key-here
-     GEMINI_MODEL_NAME=gemini-1.5-pro-latest  # Optional: Change the AI model
-     ```
-   - Available models (any Gemini model with vision capabilities works):
-     - `gemini-1.5-pro-latest` (default) - Latest Pro model with best capabilities
-     - `gemini-1.5-flash-latest` - Faster and lower cost
-     - `gemini-1.5-pro-vision` - Specialized vision model
-     - `gemini-pro-vision` - 1.0 vision model
-     - Other Gemini models with vision capabilities
+### Simple One-Line Setup (Recommended)
 
-2. **Install dotenv:**
+The simplest way to add AI debugging to your tests is with our one-line setup:
+
+1. **Install the package:**
    ```bash
-   npm install dotenv
+   npm install playwright-vision-ai-debugger
    ```
 
-3. **Configure Your Tests:**
-   - Create or update your Playwright test base file:
+2. **Create a test base file:**
+   ```typescript
+   // tests/base.ts
+   import { createAiTest } from 'playwright-vision-ai-debugger';
+   export const test = createAiTest();
+   export { expect } from '@playwright/test';
+   ```
+
+3. **Use in your tests:**
+   ```typescript
+   // tests/example.spec.ts
+   import { test, expect } from './base';
+   
+   test('my test', async ({ page }) => {
+     await page.goto('https://example.com');
+     // Your test code here
+   });
+   ```
+
+4. **Add your API key(s):**
+   Create a `.env` file in your project root with either (or both) API keys:
+   ```
+   # Choose one or both:
+   GEMINI_API_KEY=your-gemini-api-key-here
+   ANTHROPIC_API_KEY=your-claude-api-key-here
+   
+   # Optional: Set your preferred model
+   DEFAULT_AI_PROVIDER=gemini  # Options: gemini, claude, both
+   ```
+   
+   Get your Gemini API key from [Google AI Studio](https://makersuite.google.com/)
+   Get your Claude API key from [Anthropic Console](https://console.anthropic.com/)
+
+That's it! When a test fails, you'll get AI-powered analysis automatically.
+
+### Adding AI Debugging to Existing Custom Test Setup
+
+If you already have a custom test setup with fixtures, use this approach:
 
 ```typescript
 // tests/base.ts
 import { test as baseTest } from '@playwright/test';
-import { setupAiDebugging } from 'playwright-vision-ai-debugger';
-import dotenv from 'dotenv';
+import { addAiDebugging } from 'playwright-vision-ai-debugger';
 
-// Load environment variables
-dotenv.config();
-
-// Option 1: Simple setup - use the built-in setupAiDebugging function
-export const test = setupAiDebugging(baseTest);
-export { expect } from '@playwright/test';
-
-// Option 2: Advanced setup with custom configuration
-/*
-// Extend base test with tracing for better debugging
-export const test = baseTest.extend({
-  // Enable tracing for all tests
-  context: async ({ context }, use, testInfo) => {
-    // Start tracing before using the context
-    await context.tracing.start({
-      screenshots: true,
-      snapshots: true, 
-      sources: true
-    });
-    
-    await use(context);
-    
-    // After the test runs, stop tracing and save to a file if test failed
-    if (testInfo.status !== 'passed') {
-      await context.tracing.stop({
-        path: testInfo.outputPath('trace.zip')
-      });
-    } else {
-      await context.tracing.stop();
-    }
-  }
+// Your existing test setup
+const myCustomTest = baseTest.extend({
+  // Your custom fixtures here
 });
 
-// Set up AI debugging with the configured test
-export const test = setupAiDebugging(test);
+// Add AI debugging to your custom test
+export const test = addAiDebugging(myCustomTest);
 export { expect } from '@playwright/test';
-*/
 ```
 
-## Integration with Complex Test Setups
+### Advanced Configuration Options
 
-If you have a complex test setup with custom fixtures, page objects, or other extensions, you can use these approaches:
+For more control, you can configure the behavior in your test setup or set environment variables:
 
-### Method 1: Using the Enhanced setupAiDebugging Function (Recommended)
-
-As of version 1.3.0+, the `setupAiDebugging` function has been improved to handle complex test setups:
+#### Configuration via Code
 
 ```typescript
-// tests/base.ts
-import { test as baseTest } from './your-existing-test-setup'; // Your existing test with fixtures
-import { setupAiDebugging } from 'playwright-vision-ai-debugger';
-import dotenv from 'dotenv';
+// tests/multi-model-base.ts
+import { createAiTest } from 'playwright-vision-ai-debugger';
 
-// Load environment variables
-dotenv.config();
-
-// The enhanced setupAiDebugging function will work with most complex test setups
-export const test = setupAiDebugging(baseTest);
-
-// Re-export everything else from your original test setup
-export * from './your-existing-test-setup';
-```
-
-### Method 2: Using the New enhanceTestWithAiDebugging Function
-
-The new one-line integration method makes it even easier to add AI debugging to your tests:
-
-```typescript
-// tests/base.ts
-import { test as baseTest } from './your-existing-test-setup';
-import { enhanceTestWithAiDebugging } from 'playwright-vision-ai-debugger';
-import dotenv from 'dotenv';
-
-// Load environment variables
-dotenv.config();
-
-// One-line integration with your existing test setup
-export const test = enhanceTestWithAiDebugging(baseTest);
-
-// Re-export everything else
-export * from './your-existing-test-setup';
-```
-
-### Method 3: Direct afterEach Hook Integration
-
-If the above methods don't work with your test setup, you can use this more direct approach:
-
-```typescript
-// tests/ai-base.ts
-import { test as baseTest } from './your-existing-test-setup';
-import { runAiDebuggingAnalysis } from 'playwright-vision-ai-debugger';
-import dotenv from 'dotenv';
-
-// Load environment variables
-dotenv.config();
-
-// Add AI debugging through an afterEach hook
-baseTest.afterEach(async ({ page, customPage }, testInfo) => {
-  // Only run AI debugging for failed tests
-  if (testInfo.status === 'failed' && testInfo.error) {
-    try {
-      // Convert the error to ensure it has the right properties
-      const error = testInfo.error instanceof Error
-        ? testInfo.error
-        : new Error(String(testInfo.error));
-      
-      // Use whichever page object is available in your fixtures
-      const pageToUse = customPage || page;
-      
-      // Run the AI debugging analysis
-      await runAiDebuggingAnalysis(pageToUse, testInfo, error);
-    } catch (e) {
-      console.error('Error in AI debugging:', e);
-    }
-  }
+export const test = createAiTest({
+  // AI Provider options
+  aiProvider: 'both',                // 'gemini', 'claude', or 'both'
+  preferredModel: 'claude',          // Which model's results to prioritize
+  fallbackToSecondaryModel: true,    // Use secondary model if primary fails
+  
+  // Video processing options (especially for Claude)
+  useVideoFrames: true,              // Extract frames instead of using full video
+  maxFrames: 5,                      // Maximum number of frames to extract
+  frameInterval: 0,                  // 0 = extract at key moments
+  
+  // Core options
+  runOnlyOnFailure: true,            // Only run AI analysis on test failures
+  includeNetworkCapture: true,       // Include network requests in analysis
+  openReportAutomatically: true,     // Open report in browser when generated
 });
 
-// Export your test with AI debugging capabilities
-export const test = baseTest;
-
-// Re-export everything else
-export * from './your-existing-test-setup';
+export { expect } from '@playwright/test';
 ```
+
+#### Configuration via Environment Variables
+
+Set these in your `.env` file:
+
+```
+# API Keys
+GEMINI_API_KEY=your-gemini-api-key-here
+ANTHROPIC_API_KEY=your-claude-api-key-here
+
+# Model Configuration
+DEFAULT_AI_PROVIDER=both         # Options: gemini, claude, both
+PREFERRED_AI_MODEL=claude        # Options: gemini, claude
+GEMINI_MODEL_NAME=gemini-1.5-pro-latest  # Specific Gemini model
+CLAUDE_MODEL=claude-3-opus-20240229      # Specific Claude model
+
+# Video Processing
+USE_VIDEO_FRAMES=true            # Extract frames instead of using full video
+MAX_VIDEO_FRAMES=5               # Maximum number of frames to extract
+VIDEO_FRAME_INTERVAL=0           # 0 = extract at key moments
+```
+
+#### Available Models
+
+**Gemini Models**:
+- `gemini-1.5-pro-latest` (default) - Latest Pro model with best capabilities
+- `gemini-1.5-flash-latest` - Faster and lower cost
+- `gemini-1.5-pro-vision` - Specialized vision model
+- `gemini-pro-vision` - 1.0 vision model
+- Other Gemini models with vision capabilities
+
+**Claude Models**:
+- `claude-3-opus-20240229` (default) - Highest capability model
+- `claude-3-sonnet-20240229` - Balance of intelligence and speed
+- `claude-3-haiku-20240307` - Fastest, most cost-effective model
+- Other Claude models with vision capabilities
 
 ## Network Request Capture
 
@@ -297,11 +280,82 @@ Our new terminal-inspired interface design makes debugging more intuitive:
 
 <img width="1214" alt="Screenshot 2025-05-01 at 15 11 04" src="https://github.com/user-attachments/assets/9f20bc18-395c-4026-bec3-5a46b7935b68" />
 
+## Using the Playwright Vision Reporter
+
+In addition to the test fixture integration, you can use the Playwright Vision Reporter directly in your Playwright configuration. This allows AI-powered test analysis to work with any test, without modifying your test code.
+
+### Reporter Setup
+
+1. **Configure in your playwright.config.ts file:**
+
+```typescript
+// playwright.config.ts
+import { defineConfig } from '@playwright/test';
+import path from 'path';
+
+export default defineConfig({
+  // Reporter configuration
+  reporter: [
+    ['html'],
+    ['list'],
+    // Use the Vision Reporter
+    ['playwright-vision-ai-debugger/reporter', {
+      outputDir: 'playwright-vision-reports',
+      aiProvider: 'claude',
+      openReportAutomatically: true,
+      maxScreenshots: 5
+    }]
+  ],
+  
+  // Enable tracing for test failures (required for the reporter)
+  use: {
+    trace: 'on',
+    screenshot: 'only-on-failure'
+  }
+});
+```
+
+2. **Make sure your API keys are set in your environment:**
+
+```
+GEMINI_API_KEY=your-gemini-api-key-here
+ANTHROPIC_API_KEY=your-claude-api-key-here
+```
+
+### How It Works
+
+The Vision Reporter:
+1. Automatically attaches to failed tests
+2. Extracts data from Playwright traces (screenshots, HTML, network requests)
+3. Analyzes test failures with AI
+4. Generates comprehensive HTML reports
+5. Optionally opens the reports in your browser
+
+### Reporter Options
+
+The reporter accepts the following options:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `outputDir` | string | 'playwright-vision-reports' | Directory where reports will be saved |
+| `aiProvider` | 'claude' \| 'gemini' \| 'both' | 'claude' | Which AI provider to use for analysis |
+| `openReportAutomatically` | boolean | true | Whether to open reports in browser after generation |
+| `maxScreenshots` | number | 5 | Maximum number of screenshots to extract from traces |
+
+### Benefits of Using the Reporter
+
+- **Zero Code Changes**: Works with your existing tests without modification
+- **Automatic Trace Analysis**: Extracts and analyzes trace data after test runs
+- **Comprehensive Reporting**: Creates detailed reports with AI insights for all test failures
+- **Easy Integration**: Just add to your Playwright config - no need to modify test files
+
 ## API Reference
 
 The package exports the following:
 
-### `setupAiDebugging(testInstance)`
+### Test Integration API
+
+#### `setupAiDebugging(testInstance)`
 
 Sets up AI debugging for a Playwright test instance.
 
@@ -311,7 +365,7 @@ Parameters:
 Returns:
 - Enhanced test object with AI debugging capabilities
 
-### `enhanceTestWithAiDebugging(testInstance)`
+#### `enhanceTestWithAiDebugging(testInstance)`
 
 New one-line integration method for adding AI debugging to any test setup.
 
@@ -321,7 +375,7 @@ Parameters:
 Returns:
 - Enhanced test object with AI debugging capabilities
 
-### `runAiDebuggingAnalysis(page, testInfo, error, existingNetworkRequests?)`
+#### `runAiDebuggingAnalysis(page, testInfo, error, existingNetworkRequests?)`
 
 The main function that orchestrates the AI debugging analysis process.
 
@@ -331,7 +385,21 @@ Parameters:
 - `error`: Error object from the failed test
 - `existingNetworkRequests`: (Optional) Array of already captured network requests
 
-### `setupNetworkCapture(page)`
+### Reporter API
+
+#### `VisionReporter`
+
+Playwright reporter that analyzes test failures with AI.
+
+Options:
+- `outputDir`: Directory where reports will be saved
+- `aiProvider`: Which AI provider to use ('claude', 'gemini', or 'both')
+- `openReportAutomatically`: Whether to open reports automatically
+- `maxScreenshots`: Maximum number of screenshots to include
+
+### Network Utilities
+
+#### `setupNetworkCapture(page)`
 
 Sets up network request capture for a Playwright page.
 
@@ -340,8 +408,6 @@ Parameters:
 
 Returns:
 - Object containing networkRequests array and teardown function
-
-### Network Utilities
 
 - `setupAutomaticNetworkCapture(page)`: Automatically captures network requests
 - `getCapturedNetworkRequests()`: Returns captured network requests
@@ -374,31 +440,66 @@ If you encounter "Cannot find module 'playwright-vision-ai-debugger'" errors whe
    npm link playwright-vision-ai-debugger
    ```
 
-### API Key and Model Selection
+### API Keys and Model Selection
 
-If you see "Configuration Error: GEMINI_API_KEY is not set":
+If you see API key errors:
 
 1. Make sure your `.env` file is in the root of your project
-2. Verify it contains `GEMINI_API_KEY=your-actual-key`
-3. Make sure you're importing and configuring dotenv before using the package:
+2. Verify it contains the appropriate API keys:
+   ```
+   GEMINI_API_KEY=your-actual-gemini-key
+   ANTHROPIC_API_KEY=your-actual-claude-key
+   ```
+3. The package auto-loads environment variables, but you can also do it manually:
    ```typescript
    import dotenv from 'dotenv';
    dotenv.config();
    ```
 
-To change the AI model:
-1. Add `GEMINI_MODEL_NAME` to your `.env` file:
-   ```
-   GEMINI_MODEL_NAME=gemini-1.5-flash-latest
-   ```
-2. You can use any Gemini model with vision capabilities:
-   - `gemini-1.5-pro-latest` (default) - Latest Pro model with best capabilities
-   - `gemini-1.5-flash-latest` - Faster analysis, lower cost
-   - `gemini-1.5-pro-vision` - Specialized vision model
-   - `gemini-pro-vision` - 1.0 vision model
-   - Any other Gemini model with multimodal/vision support
+#### Changing AI Models
 
-3. The pricing will automatically adjust based on the model you select.
+##### Using Environment Variables:
+```
+# Select the AI provider
+DEFAULT_AI_PROVIDER=both         # Options: gemini, claude, both
+PREFERRED_AI_MODEL=claude        # Which model to prioritize when using 'both'
+
+# Specific model selection
+GEMINI_MODEL_NAME=gemini-1.5-flash-latest
+CLAUDE_MODEL=claude-3-sonnet-20240229
+```
+
+##### Using Code Configuration:
+```typescript
+const test = createAiTest({
+  aiProvider: 'both', 
+  preferredModel: 'claude'
+});
+```
+
+#### Video Frame Extraction for Claude
+
+Claude doesn't support direct video analysis like Gemini does. The package automatically extracts key frames from videos for Claude analysis:
+
+```typescript
+const test = createAiTest({
+  aiProvider: 'claude',
+  useVideoFrames: true,  // Enabled by default for Claude
+  maxFrames: 8          // Extract up to 8 key frames
+});
+```
+
+Or via environment variables:
+```
+USE_VIDEO_FRAMES=true
+MAX_VIDEO_FRAMES=8
+```
+
+#### Pricing Considerations
+
+- The pricing automatically adjusts based on the models you select
+- Using frame extraction for Claude can reduce token usage compared to sending full videos to Gemini
+- Using 'both' will increase costs but provide more comprehensive analysis
 
 ## License
 
@@ -412,3 +513,4 @@ Contributions are welcome! Feel free to fork, open issues, or submit pull reques
 
 - [Playwright](https://playwright.dev/) for the amazing testing framework
 - [Google Gemini AI](https://deepmind.google/technologies/gemini/) for the visual intelligence capabilities
+- [Anthropic Claude](https://www.anthropic.com/claude) for advanced multimodal analysis capabilities

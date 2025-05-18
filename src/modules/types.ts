@@ -4,6 +4,22 @@
 import type { Page, TestInfo } from '@playwright/test';
 
 /**
+ * Structure for a video frame extracted from a test recording
+ */
+export interface VideoFrame {
+  /** Path to the frame image file */
+  path: string;
+  /** Position in seconds where the frame was extracted from the video */
+  position: number;
+  /** Base64-encoded image data */
+  base64?: string;
+  /** MIME type of the image */
+  mimeType?: string;
+  /** Indicates if this is a placeholder frame rather than an actual video frame */
+  isPlaceholder?: boolean;
+}
+
+/**
  * Structure for the AI analysis input data
  */
 export interface AiAnalysisInput {
@@ -11,6 +27,10 @@ export interface AiAnalysisInput {
   html?: string;
   /** Base64-encoded screenshot */
   screenshotBase64?: string;
+  /** Base64-encoded video */
+  videoBase64?: string;
+  /** Path to the video file */
+  videoPath?: string;
   /** Error message */
   errorMsg: string;
   /** Error stack trace */
@@ -26,15 +46,32 @@ export interface AiAnalysisInput {
 }
 
 /**
+ * Available AI providers
+ */
+export type AiProvider = "gemini" | "claude" | "both";
+
+/**
  * Result structure from AI call
  */
 export interface AiDebuggingResult {
   /** Markdown content with the AI analysis */
-  analysisMarkdown: string | null;
+  analysisMarkdown?: string;
   /** Markdown content with usage information */
-  usageInfoMarkdown: string | null;
+  usageInfoMarkdown?: string;
   /** Markdown content with error information */
-  errorMarkdown: string | null;
+  errorMarkdown?: string;
+  /** Name of the model used */
+  modelName?: string;
+  /** Provider of the AI model */
+  provider?: string;
+  /** Number of tokens used for the analysis */
+  tokensUsed?: number;
+  /** Time taken to process the analysis in milliseconds */
+  processingTimeMs?: number;
+  /** Estimated cost of the analysis */
+  estimatedCost?: number;
+  /** Currency of the estimated cost */
+  currency?: string;
 }
 
 /**

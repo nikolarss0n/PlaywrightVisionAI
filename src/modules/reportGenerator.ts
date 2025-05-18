@@ -7,12 +7,71 @@ import type { TestInfo } from '@playwright/test';
 import { marked } from 'marked';
 import type { NetworkRequest } from './types';
 
+// Configure marked to apply terminal-like styling for AI content
+marked.use({
+  renderer: {
+    code(token) {
+      const { text, lang } = token;
+      return `<pre><code class="language-${lang || 'plaintext'}">${text}</code></pre>`;
+    },
+    heading(token) {
+      const { text, depth } = token;
+      // Clear any floats before headings to ensure proper layout
+      if (depth === 3) {
+        return `<div style="clear: both;"></div><div class="card-header"><h${depth} class="card-title">${text}</h${depth}></div>`;
+      }
+      return `<div style="clear: both;"></div><h${depth} class="card-title">${text}</h${depth}>`;
+    },
+    list(token) {
+      const { ordered, items } = token;
+      const type = ordered ? 'ol' : 'ul';
+      // Check if items is an object array and stringify it properly
+      let itemsContent;
+      if (typeof items === 'object' && !Array.isArray(items)) {
+        // If items is an object but not an array, convert to string
+        itemsContent = JSON.stringify(items, null, 2);
+      } else {
+        itemsContent = items;
+      }
+      return `<${type} class="ai-styled-list">${itemsContent}</${type}>`;
+    },
+    listitem(token) {
+      const { text } = token;
+      // Handle objects in list items
+      if (typeof text === 'object') {
+        const jsonText = JSON.stringify(text, null, 2);
+        return `<li class="ai-styled-item">${jsonText}</li>`;
+      } else if (text && text.includes('[object Object]')) {
+        // Replace the [object Object] pattern with a cleaner representation
+        const cleanedText = text.replace(/\[object Object\]/g, '{ "item": "details" }');
+        return `<li class="ai-styled-item">${cleanedText}</li>`;
+      }
+      return `<li class="ai-styled-item">${text}</li>`;
+    },
+    paragraph(token) {
+      const { text } = token;
+      // Handle objects in paragraphs
+      if (typeof text === 'object') {
+        const jsonText = JSON.stringify(text, null, 2);
+        return `<p class="terminal-paragraph">${jsonText}</p>`;
+      } else if (text && text.includes('[object Object]')) {
+        // Replace the [object Object] pattern with a cleaner representation
+        const cleanedText = text.replace(/\[object Object\]/g, '{ "item": "details" }');
+        return `<p class="terminal-paragraph">${cleanedText}</p>`;
+      }
+      return `<p class="terminal-paragraph">${text}</p>`;
+    }
+  }
+});
+
 /**
  * Helper function to escape HTML characters
  */
 export function escapeHtml(unsafe: string | undefined | null): string {
   if (!unsafe) return '';
-  return unsafe
+  // Handle non-string inputs (like objects) by converting to string first
+  const safeString = typeof unsafe === 'string' ? unsafe : JSON.stringify(unsafe, null, 2);
+  return safeString
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -27,11 +86,11 @@ export function safeErrorToString(errorMsg: unknown): string {
   if (errorMsg === null || errorMsg === undefined) {
     return 'No error message available';
   }
-  
+
   if (typeof errorMsg === 'string') {
     return errorMsg;
   }
-  
+
   if (typeof errorMsg === 'object') {
     try {
       // Try to stringify the object with proper formatting
@@ -41,20 +100,21 @@ export function safeErrorToString(errorMsg: unknown): string {
       return Object.prototype.toString.call(errorMsg);
     }
   }
-  
+
   // For anything else, convert to string
   return String(errorMsg);
 }
 
 /**
  * Saves the HTML report and attaches it to the test results
+ * @returns The path to the saved HTML report
  */
 export async function saveAndAttachReport(
   testInfo: TestInfo,
   htmlReport: string,
   analysisMarkdown?: string,
   usageInfoMarkdown?: string
-): Promise<void> {
+): Promise<string | undefined> {
   try {
     // Create a folder for AI debug reports if it doesn't exist
     const reportFolder = path.join(process.cwd(), 'ai-analysis');
@@ -65,17 +125,17 @@ export async function saveAndAttachReport(
     // Generate a timestamp-based filename to avoid overwriting
     const timestamp = new Date().toISOString().replace(/:/g, '-');
     const reportFilePath = path.join(reportFolder, `ai-debug-analysis-${timestamp}.html`);
-    
+
     // Write the HTML report to a file
     fs.writeFileSync(reportFilePath, htmlReport);
     console.log(`✅ HTML report saved to: ${reportFilePath}`);
-    
+
     // Attach the report to the test results
     await testInfo.attach('ai-debug-report.html', {
       path: reportFilePath,
       contentType: 'text/html',
     });
-    
+
     // Also save markdown files if provided
     if (analysisMarkdown) {
       const markdownPath = path.join(reportFolder, `ai-analysis-${timestamp}.md`);
@@ -85,7 +145,7 @@ export async function saveAndAttachReport(
         contentType: 'text/markdown',
       });
     }
-    
+
     if (usageInfoMarkdown) {
       const usagePath = path.join(reportFolder, `usage-info-${timestamp}.md`);
       fs.writeFileSync(usagePath, usageInfoMarkdown);
@@ -94,9 +154,13 @@ export async function saveAndAttachReport(
         contentType: 'text/markdown',
       });
     }
+
+    // Return the path to the HTML report
+    return reportFilePath;
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Failed to save or attach report: ${errorMessage}`);
+    return undefined;
   }
 }
 
@@ -112,7 +176,15 @@ export function generateHtmlReport({
   networkRequests,
   aiAnalysisHtml,
   usageInfoHtml,
-  screenshotBase64
+  screenshotBase64,
+  videoPath,
+  videoBase64,
+  modelName,
+  provider,
+  tokensUsed,
+  processingTimeMs,
+  estimatedCost,
+  currency
 }: {
   testInfo: TestInfo;
   failingSelector?: string | null;
@@ -123,9 +195,17 @@ export function generateHtmlReport({
   aiAnalysisHtml: string;
   usageInfoHtml: string;
   screenshotBase64?: string;
+  videoPath?: string;
+  videoBase64?: string;
+  modelName?: string;
+  provider?: string;
+  tokensUsed?: number;
+  processingTimeMs?: number;
+  estimatedCost?: number;
+  currency?: string;
 }): string {
   const reportTitle = `Playwright Vision AI Debug Report: ${escapeHtml(testInfo.title)}`;
-  
+
   // Generate HTML header with styling
   const htmlHeader = `
 <!DOCTYPE html>
@@ -176,7 +256,7 @@ export function generateHtmlReport({
             --tab-hover: rgba(32, 34, 35, 0.8);
             --tab-active: rgba(27, 29, 30, 0.8);
         }
-        
+
         /* Blurred background image */
         .bg-blur {
             position: fixed;
@@ -281,7 +361,7 @@ export function generateHtmlReport({
         .method-put { color: var(--warn-color); }
         .method-delete { color: var(--error-color); }
         .method-options { color: var(--purple-color); }
-        
+
         /* Status colors */
         .status-success { color: var(--success-color); }
         .status-redirect { color: var(--warn-color); }
@@ -418,21 +498,23 @@ export function generateHtmlReport({
 
         /* Screenshot thumbnail styling */
         .screenshot-thumbnail {
-            max-width: 350px;
+            max-width: 300px;
             margin: 1rem 0;
             border-radius: 6px;
-            border: 2px solid var(--terminal-border);
+            border: 2px solid var(--claude-orange);
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
             cursor: pointer;
             transition: all 0.2s ease;
+            float: left;
+            margin-right: 20px;
         }
-        
+
         .screenshot-thumbnail:hover {
             transform: scale(1.02);
             box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
             border-color: var(--claude-purple);
         }
-        
+
         .screenshot-modal {
             display: none;
             position: fixed;
@@ -451,7 +533,7 @@ export function generateHtmlReport({
             transform: translate(-50%, -50%);
             border: 1px solid var(--terminal-border);
         }
-        
+
         .screenshot-modal-content {
             display: block;
             border-radius: 6px;
@@ -460,7 +542,7 @@ export function generateHtmlReport({
             object-fit: contain;
             margin: 0 auto;
         }
-        
+
         .screenshot-modal-header {
             display: flex;
             justify-content: space-between;
@@ -469,14 +551,14 @@ export function generateHtmlReport({
             padding-bottom: 8px;
             border-bottom: 1px solid var(--terminal-border);
         }
-        
+
         .screenshot-modal-title {
             color: var(--heading-color);
             font-size: 0.9rem;
             margin: 0;
             font-weight: 500;
         }
-        
+
         .screenshot-close {
             color: var(--text-color);
             background-color: var(--code-bg);
@@ -488,7 +570,7 @@ export function generateHtmlReport({
             cursor: pointer;
             transition: all 0.2s ease;
         }
-        
+
         .screenshot-close:hover,
         .screenshot-close:focus {
             background-color: var(--error-color);
@@ -496,6 +578,31 @@ export function generateHtmlReport({
             text-decoration: none;
             border-color: var(--error-color);
             cursor: pointer;
+        }
+        
+        .screenshot-corner-close {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            font-size: 20px;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+        }
+        
+        .screenshot-corner-close:hover {
+            background-color: var(--error-color);
+            transform: scale(1.1);
         }
 
         /* Screenshot in Failure Explanation section */
@@ -505,58 +612,70 @@ export function generateHtmlReport({
             gap: 20px;
             align-items: flex-start;
             margin-top: 15px;
+            margin-bottom: 25px;
+            background-color: rgba(28, 30, 31, 0.4);
+            padding: 15px;
+            border-radius: 8px;
         }
-        
+
         .failure-screenshot {
-            flex: 0 0 300px;
-            max-width: 300px;
+            flex: 0 0 280px;
+            max-width: 280px;
             margin-bottom: 15px;
             border-radius: 6px;
-            border: 2px solid var(--terminal-border);
+            border: 2px solid var(--claude-orange);
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
             cursor: pointer;
             transition: all 0.2s ease;
         }
-        
+
         .failure-screenshot:hover {
             transform: scale(1.02);
             box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
             border-color: var(--claude-purple);
         }
-        
+
         .failure-text {
             flex: 1;
             min-width: 250px;
         }
+        
+        /* Clear the float for screenshots in the analysis */
+        .ai-content-area p:after,
+        .terminal-paragraph:after {
+            content: "";
+            display: table;
+            clear: both;
+        }
 
         /* AI content area */
-        .ai-content-area p { 
+        .ai-content-area p, .terminal-paragraph {
             margin-bottom: 0.75rem;
             margin-top: 0.5rem;
             line-height: 1.6;
         }
-        
+
         /* Enhanced bullet points and list styling for AI analysis */
-        .ai-content-area ul {
+        .ai-content-area ul, .ai-styled-list {
             padding-left: 1.5rem;
             margin: 0.8rem 0 1.2rem;
         }
-        
-        .ai-content-area ul li {
+
+        .ai-content-area ul li, .ai-styled-item {
             margin-bottom: 0.6rem;
             position: relative;
             padding-left: 0.5rem;
             list-style-type: none;
         }
-        
-        .ai-content-area ul li::before {
+
+        .ai-content-area ul li::before, .ai-styled-item::before {
             content: "✦";
             color: var(--claude-green);
             position: absolute;
             left: -1.2rem;
             font-weight: bold;
         }
-        
+
         /* Improved section separation */
         .ai-content-area hr {
             border: none;
@@ -564,33 +683,33 @@ export function generateHtmlReport({
             background: linear-gradient(90deg, transparent, var(--claude-purple) 50%, transparent);
             margin: 1rem 0px 2rem
         }
-        
+
         /* Enhanced heading styling */
-        .ai-content-area h3 {
+        .ai-content-area h3, .card-title {
             color: var(--claude-orange);
         }
-        
+
         /* Code block highlighting */
-        .ai-content-area code { 
-            background-color: rgba(28, 30, 31, 0.7); 
-            padding: 2px 4px; 
-            border-radius: 3px; 
-            font-size: 0.9em; 
+        .ai-content-area code {
+            background-color: rgba(28, 30, 31, 0.7);
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-size: 0.9em;
             color: var(--claude-blue);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        
-        .ai-content-area pre { 
+
+        .ai-content-area pre {
             background-color: rgba(28, 30, 31, 0.7);
             box-shadow: 0 3px 6px rgba(0, 0, 0, 0.2);
         }
-        
-        .ai-content-area pre code { 
-            background: none; 
-            padding: 0; 
+
+        .ai-content-area pre code {
+            background: none;
+            padding: 0;
             border: none;
         }
-        
+
         .ai-highlight {
             background-color: rgba(138, 86, 172, 0.3);
             border-radius: 2px;
@@ -845,6 +964,7 @@ export function generateHtmlReport({
                         <button class="tab-button active" data-tab="overview">Test Overview</button>
                         <button class="tab-button" data-tab="error">Error Details <span class="badge badge-error">1</span></button>
                         <button class="tab-button" data-tab="ai">AI Analysis</button>
+                        ${videoPath ? `<button class="tab-button" data-tab="video">Video Recording</button>` : ''}
                         <button class="tab-button" data-tab="network">Network Requests <span class="badge badge-info">${networkRequests.length}</span></button>
                         <button class="tab-button" data-tab="usage">Usage Info</button>
                     </div>`;
@@ -898,7 +1018,7 @@ export function generateHtmlReport({
                             <div class="card-body">
                                 <p><strong class="text-error">Error Message:</strong></p>
                                 <code class="error-block-code">${escapeHtml(safeErrorToString(errorMsg))}</code>
-                                
+
                                 ${stackTrace ? `
                                 <div class="mt-4">
                                     <details>
@@ -923,10 +1043,12 @@ export function generateHtmlReport({
                                 <button class="ai-filter-btn" data-filter="code" onclick="filterAiContent('code')">Code Examples</button>
                             </div>
                         </div>
-                        <div id="aiContentContainer" class="ai-content-area">
+                        <div id="aiContentContainer" class="ai-content-area terminal-body">
+                            ${screenshotBase64 ? 
+                            `<img class="screenshot-thumbnail" src="data:image/png;base64,${screenshotBase64}" alt="Test Screenshot" onclick="openScreenshotModal();" />` : ''}
                             ${aiAnalysisHtml}
                         </div>
-                        
+
                         ${screenshotBase64 ? `
                         <!-- Modal for fullscreen screenshot -->
                         <div id="screenshotModal" class="screenshot-modal">
@@ -934,9 +1056,36 @@ export function generateHtmlReport({
                                 <h4 class="screenshot-modal-title">Screenshot Preview</h4>
                                 <button class="screenshot-close" onclick="closeScreenshotModal()">Close</button>
                             </div>
-                            <img class="screenshot-modal-content" src="data:image/png;base64,${screenshotBase64}" />
+                            <div style="position: relative;">
+                                <img class="screenshot-modal-content" src="data:image/png;base64,${screenshotBase64}" />
+                                <button class="screenshot-corner-close" onclick="closeScreenshotModal()">&times;</button>
+                            </div>
                         </div>` : ''}
                     </div>`;
+
+  // Video Tab
+  const videoTab = videoPath ? `
+                    <!-- Video Recording Tab -->
+                    <div class="tab-content" id="video-tab">
+                        <div class="card mt-4">
+                            <div class="card-header">
+                                <h3 class="card-title">Test Recording</h3>
+                            </div>
+                            <div class="card-body">
+                                <p>The following video was recorded during the test execution:</p>
+                                ${videoBase64 ?
+                                  `<video controls width="100%" style="max-width: 800px; margin: 1rem 0; border-radius: 6px; border: 2px solid var(--terminal-border);">
+                                    <source src="data:video/mp4;base64,${videoBase64}" type="video/mp4">
+                                    Your browser does not support the video tag.
+                                  </video>` :
+                                  `<p>Video available at: <code>${escapeHtml(videoPath)}</code></p>
+                                   <p class="text-dim">(Video file is too large to embed directly in the report)</p>
+                                   <p>You can view the video by opening it in your browser or media player.</p>
+                                   <a href="${videoPath}" target="_blank" class="btn" style="display: inline-block; padding: 8px 16px; background-color: var(--claude-purple); color: white; text-decoration: none; border-radius: 4px; margin-top: 10px;">Open Video in Browser</a>`
+                                }
+                            </div>
+                        </div>
+                    </div>` : '';
 
   // Network Requests Tab
   const networkTabStart = `
@@ -946,7 +1095,7 @@ export function generateHtmlReport({
                             <h2 class="card-title">Network Requests</h2>
                         </div>
                         <div class="mb-4">
-                            <input type="text" id="networkSearch" placeholder="Search network requests..." 
+                            <input type="text" id="networkSearch" placeholder="Search network requests..."
                                 onkeyup="filterNetworkRequests()">
                             <div class="filter-buttons">
                                 <button class="filter-btn active-filter" data-filter="all" onclick="filterByType('all')">All</button>
@@ -959,7 +1108,7 @@ export function generateHtmlReport({
                                 <button class="filter-btn error-filter" onclick="filterByStatus('error')">Errors</button>
                             </div>
                         </div>
-                        
+
                         <div class="overflow-x-auto">
                             <table id="networkTable">
                                 <thead>
@@ -973,16 +1122,16 @@ export function generateHtmlReport({
                                     </tr>
                                 </thead>
                                 <tbody>`;
-                                
+
   // Generate network rows
-  const networkTableRows = networkRequests.length > 0 
+  const networkTableRows = networkRequests.length > 0
     ? networkRequests.map((req, index) => {
         const statusClass = (req.status ?? 0) >= 400 ? 'status-error' : ((req.status ?? 0) >= 300 ? 'status-redirect' : 'status-success');
-        const methodClass = req.method?.toLowerCase() === 'get' ? 'method-get' : 
+        const methodClass = req.method?.toLowerCase() === 'get' ? 'method-get' :
                           req.method?.toLowerCase() === 'post' ? 'method-post' :
                           req.method?.toLowerCase() === 'put' ? 'method-put' :
                           req.method?.toLowerCase() === 'delete' ? 'method-delete' : '';
-        
+
         return `
                                     <tr class="network-row" data-type="${escapeHtml(req.resourceType || '')}" data-url="${escapeHtml(req.url || '')}" data-status="${req.status || 0}">
                                         <td class="${methodClass}">${escapeHtml(req.method || 'GET')}</td>
@@ -1038,7 +1187,7 @@ export function generateHtmlReport({
                                             </div>
                                         </td>
                                     </tr>`;
-    }).join('') 
+    }).join('')
     : '<tr><td colspan="6">No network requests recorded</td></tr>';
 
   const networkTabEnd = `
@@ -1061,7 +1210,7 @@ export function generateHtmlReport({
                                         <p><strong>Status Codes:</strong> ${
                                             Object.entries(networkRequests.reduce((acc, req) => {
                                                 if (req.status) {
-                                                    const key = req.status >= 500 ? '5xx' : 
+                                                    const key = req.status >= 500 ? '5xx' :
                                                               req.status >= 400 ? '4xx' :
                                                               req.status >= 300 ? '3xx' :
                                                               req.status >= 200 ? '2xx' : '1xx';
@@ -1076,7 +1225,7 @@ export function generateHtmlReport({
                         </div>
                     </div>`;
 
-  // Usage Info Tab
+  // Usage Info Tab - Direct formatting to avoid markdown parsing issues
   const usageTab = `
                     <!-- Usage Info Tab -->
                     <div class="tab-content" id="usage-tab">
@@ -1085,10 +1234,15 @@ export function generateHtmlReport({
                                 <h3 class="card-title">AI Model Details</h3>
                             </div>
                             <div class="card-body">
-                                <p><strong>Model:</strong> gemini-1.5-pro-latest</p>
-                                <p><strong>Provider:</strong> Google Generative AI</p>
-                                <div id="usageContentContainer">
-                                    ${usageInfoHtml}
+                                <p><strong>Model:</strong> ${modelName || 'Unknown'}</p>
+                                <p><strong>Provider:</strong> ${provider || 'Unknown'}</p>
+                                <div class="terminal-section" style="background: rgba(40, 42, 43, 0.4); border-radius: 6px; padding: 15px; margin-top: 15px;">
+                                    <h4 style="margin-top: 0; color: var(--claude-orange);">Usage Statistics</h4>
+                                    <ul style="list-style-type: none; padding-left: 0;">
+                                        <li style="margin-bottom: 8px;"><strong>Tokens Used:</strong> ${(tokensUsed || 0).toLocaleString()}</li>
+                                        <li style="margin-bottom: 8px;"><strong>Processing Time:</strong> ${((processingTimeMs || 0) / 1000).toFixed(2)} seconds</li>
+                                        <li style="margin-bottom: 8px;"><strong>Estimated Cost:</strong> $${(estimatedCost || 0).toFixed(6)} ${currency || 'USD'}</li>
+                                    </ul>
                                 </div>
                             </div>
                         </div>
@@ -1110,17 +1264,17 @@ export function generateHtmlReport({
                 button.addEventListener('click', function() {
                     // Get the tab ID from the data-tab attribute
                     const tabId = this.dataset.tab;
-                    
+
                     // Remove active class from all buttons and tabs
                     document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
                     document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-                    
+
                     // Add active class to clicked button and corresponding tab
                     this.classList.add('active');
                     document.getElementById(tabId + '-tab').classList.add('active');
                 });
             });
-            
+
             // Apply styles to filter buttons
             const filterButtons = document.querySelectorAll('.filter-btn');
             filterButtons.forEach(btn => {
@@ -1129,7 +1283,7 @@ export function generateHtmlReport({
                     btn.style.color = 'white';
                 }
             });
-            
+
             // Apply styles to AI filter buttons
             const aiFilterButtons = document.querySelectorAll('.ai-filter-btn');
             aiFilterButtons.forEach(btn => {
@@ -1139,7 +1293,7 @@ export function generateHtmlReport({
                 }
             });
         });
-        
+
         // Toggle request details
         function toggleDetails(id) {
             const element = document.getElementById(id);
@@ -1149,17 +1303,17 @@ export function generateHtmlReport({
                 element.classList.add('hidden');
             }
         }
-        
+
         // Network request filtering functions
         function filterNetworkRequests() {
             const searchText = document.getElementById('networkSearch').value.toLowerCase();
             const rows = document.querySelectorAll('#networkTable tbody tr.network-row');
-            
+
             rows.forEach(row => {
                 const url = row.getAttribute('data-url').toLowerCase();
                 const detailsRowId = 'request-' + (row.rowIndex - 2);
                 const detailsRow = document.getElementById(detailsRowId);
-                
+
                 // If the search text is found in the URL
                 if (url.includes(searchText)) {
                     row.style.display = '';
@@ -1176,7 +1330,7 @@ export function generateHtmlReport({
                 }
             });
         }
-        
+
         function filterByType(type) {
             document.querySelectorAll('.filter-btn').forEach(btn => {
                 if (btn.getAttribute('data-filter') === type) {
@@ -1188,20 +1342,20 @@ export function generateHtmlReport({
                     btn.style.backgroundColor = '';
                     btn.style.color = '';
                 }
-                
+
                 if (btn.classList.contains('error-filter')) {
                     btn.classList.remove('active-filter');
                     btn.style.backgroundColor = '';
                     btn.style.color = '';
                 }
             });
-            
+
             const rows = document.querySelectorAll('#networkTable tbody tr.network-row');
             rows.forEach(row => {
                 const rowType = row.getAttribute('data-type');
                 const detailsRowId = 'request-' + (row.rowIndex - 2);
                 const detailsRow = document.getElementById(detailsRowId);
-                
+
                 if (type === 'all' || rowType === type) {
                     row.style.display = '';
                     if (detailsRow && !detailsRow.classList.contains('hidden')) {
@@ -1215,14 +1369,14 @@ export function generateHtmlReport({
                 }
             });
         }
-        
+
         function filterByStatus(status) {
             const rows = document.querySelectorAll('#networkTable tbody tr.network-row');
             rows.forEach(row => {
                 const status = parseInt(row.getAttribute('data-status') || '0');
                 const detailsRowId = 'request-' + (row.rowIndex - 2);
                 const detailsRow = document.getElementById(detailsRowId);
-                
+
                 if (status >= 400) {
                     row.style.display = '';
                     if (detailsRow && !detailsRow.classList.contains('hidden')) {
@@ -1236,27 +1390,27 @@ export function generateHtmlReport({
                 }
             });
         }
-        
+
         // AI content filtering functions
         function searchAiContent() {
             const searchText = document.getElementById('aiSearchInput').value.toLowerCase();
             const container = document.getElementById('aiContentContainer');
-            
+
             if (!searchText.trim()) {
                 // If search is empty, show everything and reset highlighting
                 showAllAiSections();
                 return;
             }
-            
+
             // Extract all headings and paragraphs for text search
             const contentElements = container.querySelectorAll('h1, h2, h3, h4, h5, h6, p, li, code');
-            
+
             // Track if we found any matches
             let foundMatch = false;
-            
+
             contentElements.forEach(element => {
                 const text = element.textContent.toLowerCase();
-                
+
                 // Check if this element contains the search text
                 if (text.includes(searchText)) {
                     // Make sure this element and all its parents are visible
@@ -1265,30 +1419,30 @@ export function generateHtmlReport({
                         if (parent.style) parent.style.display = '';
                         parent = parent.parentElement;
                     }
-                    
+
                     // Highlight the matching text
                     const originalHTML = element.innerHTML;
                     const regex = new RegExp('(' + searchText + ')', 'gi');
                     element.innerHTML = originalHTML.replace(regex, '<mark class="ai-highlight">$1</mark>');
-                    
+
                     foundMatch = true;
                 } else if (element.style) {
                     // Hide non-matching elements
                     element.style.display = 'none';
                 }
             });
-            
+
             // If no match found, show a message
             if (!foundMatch) {
                 const noResults = document.createElement('p');
                 noResults.textContent = 'No results found for "' + searchText + '"';
                 noResults.classList.add('text-dim');
                 noResults.id = 'ai-no-results';
-                
+
                 // Remove any existing no-results message
                 const existingMessage = document.getElementById('ai-no-results');
                 if (existingMessage) existingMessage.remove();
-                
+
                 container.prepend(noResults);
             } else {
                 // Remove any existing no-results message
@@ -1296,20 +1450,20 @@ export function generateHtmlReport({
                 if (existingMessage) existingMessage.remove();
             }
         }
-        
+
         function showAllAiSections() {
             const container = document.getElementById('aiContentContainer');
             const allElements = container.querySelectorAll('*');
-            
+
             allElements.forEach(el => {
                 if (el.style) el.style.display = '';
             });
-            
+
             // Remove any existing no-results message
             const existingMessage = document.getElementById('ai-no-results');
             if (existingMessage) existingMessage.remove();
         }
-        
+
         function filterAiContent(type) {
             // Update active button state
             const buttons = document.querySelectorAll('.ai-filter-btn');
@@ -1324,20 +1478,20 @@ export function generateHtmlReport({
                     btn.style.color = '';
                 }
             });
-            
+
             // Reset search field
             if (document.getElementById('aiSearchInput')) {
                 document.getElementById('aiSearchInput').value = '';
             }
-            
+
             // Show all sections first
             showAllAiSections();
-            
+
             // If 'all' is selected, we're done
             if (type === 'all') return;
-            
+
             const container = document.getElementById('aiContentContainer');
-            
+
             // Depending on the filter, show/hide relevant sections
             switch(type) {
                 case 'root-cause':
@@ -1360,7 +1514,7 @@ export function generateHtmlReport({
                             parent = parent.parentElement;
                         }
                     });
-                    
+
                     // Hide elements that don't contain code
                     const nonCodeElements = container.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6');
                     nonCodeElements.forEach(el => {
@@ -1370,31 +1524,31 @@ export function generateHtmlReport({
                     });
                     break;
             }
-            
+
             // Helper function to highlight sections with specific keywords
             function highlightSections(keywords) {
                 // Get all section elements - each section starts with an h3 and ends at the next h3 or end of container
                 const sections = [];
                 const headings = container.querySelectorAll('h3');
-                
+
                 headings.forEach((heading, index) => {
                     // Create a section object with the heading and all elements until next heading
                     const section = {
                         heading: heading,
                         elements: []
                     };
-                    
+
                     // Get all elements after this heading until the next heading
                     let currentElement = heading.nextElementSibling;
                     while (currentElement && currentElement.tagName !== 'H3') {
                         section.elements.push(currentElement);
                         currentElement = currentElement.nextElementSibling;
                     }
-                    
+
                     // Add this section to our sections array
                     sections.push(section);
                 });
-                
+
                 // Now filter each section based on keywords
                 sections.forEach(section => {
                     // Get the text content of the entire section
@@ -1402,7 +1556,7 @@ export function generateHtmlReport({
                     section.elements.forEach(el => {
                         sectionText += ' ' + el.textContent.toLowerCase();
                     });
-                    
+
                     let shouldShow = false;
                     for (const keyword of keywords) {
                         if (sectionText.includes(keyword)) {
@@ -1410,7 +1564,7 @@ export function generateHtmlReport({
                             break;
                         }
                     }
-                    
+
                     if (!shouldShow) {
                         // Hide this section
                         section.heading.style.display = 'none';
@@ -1429,14 +1583,14 @@ export function generateHtmlReport({
                 modal.style.display = 'block';
             }
         }
-        
+
         function closeScreenshotModal() {
             const modal = document.getElementById('screenshotModal');
             if (modal) {
                 modal.style.display = 'none';
             }
         }
-        
+
         // Close modal if clicking outside the image
         window.onclick = function(event) {
             const modal = document.getElementById('screenshotModal');
@@ -1455,22 +1609,22 @@ export function generateHtmlReport({
                         // Position the modal near the click position
                         const x = e.pageX;
                         const y = e.pageY;
-                        
+
                         // Set max sizes to avoid modal going out of viewport
                         const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
                         const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
-                        
+
                         // Calculate position, ensuring the modal stays within viewport
                         let modalLeft = x - 20;
                         let modalTop = y - 20;
-                        
+
                         // Get modal dimensions (after temporarily making it visible offscreen)
                         modal.style.display = 'block';
                         modal.style.top = '-9999px';
                         modal.style.left = '-9999px';
                         const modalWidth = modal.offsetWidth;
                         const modalHeight = modal.offsetHeight;
-                        
+
                         // Adjust if the modal would go outside viewport
                         if (modalLeft + modalWidth > viewportWidth) {
                             modalLeft = viewportWidth - modalWidth - 20;
@@ -1478,18 +1632,18 @@ export function generateHtmlReport({
                         if (modalTop + modalHeight > viewportHeight) {
                             modalTop = viewportHeight - modalHeight - 20;
                         }
-                        
+
                         // Ensure we don't go off the left or top edges
                         modalLeft = Math.max(20, modalLeft);
                         modalTop = Math.max(20, modalTop);
-                        
+
                         // Position and show the modal
                         modal.style.left = modalLeft + 'px';
                         modal.style.top = modalTop + 'px';
                     }
                 });
             });
-            
+
             // Also make sure the close button works
             const closeButton = document.querySelector('.screenshot-close');
             if (closeButton) {
@@ -1504,76 +1658,60 @@ export function generateHtmlReport({
             document.querySelectorAll('pre code').forEach((block) => {
                 hljs.highlightElement(block);
             });
-            
-            // Apply card-header styling to headings in the AI Analysis tab
+
+            // We now handle heading styling directly in the marked renderer
             const aiContainer = document.getElementById('aiContentContainer');
             if (aiContainer) {
-                const h3Elements = aiContainer.querySelectorAll('h3');
-                h3Elements.forEach(h3 => {
-                    // Create a new div with the card-header class
-                    const headerDiv = document.createElement('div');
-                    headerDiv.className = 'card-header';
-                    
-                    // Clone the h3 and add the card-title class
-                    const newHeading = h3.cloneNode(true);
-                    newHeading.className = 'card-title';
-                    
-                    // Insert the heading into the header div
-                    headerDiv.appendChild(newHeading);
-                    
-                    // Replace the original h3 with the header div
-                    h3.parentNode.insertBefore(headerDiv, h3);
-                    h3.remove();
-                });
-                
+                // Apply any additional styling to AI content if needed
+
                 // Find the Failure Explanation heading and insert screenshot
                 ${screenshotBase64 ? `
                 // Find the failure explanation section
                 const failureHeading = Array.from(aiContainer.querySelectorAll('.card-title')).find(
                     heading => heading.textContent && heading.textContent.toLowerCase().includes('failure explanation')
                 );
-                
+
                 if (failureHeading) {
                     // Get the parent card header
                     const cardHeader = failureHeading.closest('.card-header');
-                    
+
                     if (cardHeader) {
                         // Get all content elements following this header until the next header
                         const contentContainer = document.createElement('div');
                         contentContainer.className = 'failure-explanation-container';
-                        
+
                         // Create screenshot element
                         const screenshot = document.createElement('img');
                         screenshot.className = 'failure-screenshot';
                         screenshot.src = 'data:image/png;base64,${screenshotBase64}';
                         screenshot.alt = 'Error Screenshot';
                         screenshot.onclick = function() { openScreenshotModal(); };
-                        
+
                         // Create the text container for the explanation
                         const textContainer = document.createElement('div');
                         textContainer.className = 'failure-text';
-                        
+
                         // Find all elements after the card header until the next card header or hr
                         let currentElement = cardHeader.nextElementSibling;
                         const collectedElements = [];
-                        
-                        while (currentElement && 
+
+                        while (currentElement &&
                                !currentElement.matches('hr, .card-header')) {
                             collectedElements.push(currentElement);
                             const nextElement = currentElement.nextElementSibling;
                             currentElement.remove();
                             currentElement = nextElement;
                         }
-                        
+
                         // Append all collected elements to the text container
                         collectedElements.forEach(el => {
                             textContainer.appendChild(el);
                         });
-                        
+
                         // Add screenshot and text container to the content container
                         contentContainer.appendChild(screenshot);
                         contentContainer.appendChild(textContainer);
-                        
+
                         // Insert the content container after the header
                         if (currentElement) {
                             cardHeader.parentNode.insertBefore(contentContainer, currentElement);
@@ -1589,6 +1727,7 @@ export function generateHtmlReport({
 </html>`;
 
   // Combine all parts
-  return htmlHeader + bodyStart + overviewTab + errorTab + aiAnalysisTab + networkTabStart 
-    + networkTableRows + networkTabEnd + usageTab + bodyEnd + javaScript;
+  return htmlHeader + bodyStart + overviewTab + errorTab + aiAnalysisTab +
+    (videoTab || '') + networkTabStart + networkTableRows + networkTabEnd +
+    usageTab + bodyEnd + javaScript;
 }
